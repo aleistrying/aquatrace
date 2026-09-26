@@ -234,6 +234,16 @@ if "sim_running" not in st.session_state:
     st.session_state.sim_running = True
 if "sim_total_serviced" not in st.session_state:
     st.session_state.sim_total_serviced = 0  # cumulative count of household water-fill/sewage-pump events
+if "sim_last_sync" not in st.session_state:
+    st.session_state.sim_last_sync = st.session_state.sim_now
+if "sim_synced_snapshot" not in st.session_state:
+    # Household sensor readings as of the last batch sync only — empty until
+    # the first sync fires (see _compute_snapshot / the fragment below). This
+    # is deliberately NOT recomputed live every tick: households have no
+    # continuous signal (see the Truck page's connectivity explainer), so the
+    # UI should only show what was actually last synced, not a continuously
+    # gliding "live" number.
+    st.session_state.sim_synced_snapshot = {}
 
 col_a, col_b, col_c, col_d = st.columns([1, 1, 1, 1.4])
 with col_a:
@@ -244,6 +254,16 @@ with col_b:
     # the fragment's periodic reruns instead of visibly jumping, while still
     # letting the slider be pushed up for a faster-forward demo.
     minutes_per_tick = st.slider("Sim minutes / tick", 2, 90, 10)
+    # How often household sensor data actually reaches this dashboard in
+    # simulated time - the dispatch LOGIC below still runs every tick (that's
+    # the algorithm working), but the DISPLAYED household water/sewage/
+    # potability numbers only jump to their latest true value at these
+    # boundaries, matching the no-continuous-signal connectivity model
+    # instead of implying live telemetry. 30 min default: frequent enough to
+    # feel responsive over a multi-hour demo run, wide enough to visibly
+    # freeze between syncs rather than reading as "basically live."
+    batch_sync_minutes = st.slider("Batch sync every (sim min)", 15, 120, 30, step=15,
+                                    help="How often household sensor readings batch-upload, in simulated minutes — not truly continuous, per this project's connectivity model.")
 with col_c:
     view_mode = st.radio("View", ["Households", "Community summary"], horizontal=True)
 with col_d:
@@ -254,6 +274,8 @@ with col_d:
         st.session_state.sim_sewage_trucks = _new_fleets()
         st.session_state.sim_events = []
         st.session_state.sim_total_serviced = 0
+        st.session_state.sim_last_sync = st.session_state.sim_now
+        st.session_state.sim_synced_snapshot = {}
         st.rerun()
 
 map_community = st.selectbox(
@@ -351,6 +373,36 @@ def _worst_variant(h, temp_c, now) -> tuple[str, str, str]:
     return worst, water_label, sew_label
 
 
+def _compute_snapshot(households: list, now: datetime) -> dict:
+    """Batch-sync snapshot: freezes every household's DISPLAYED sensor
+    reading (water %, sewage %, potability %, chlorine residual, and the
+    water/sewage/worst status variants+labels) as of `now`. Called only at
+    session start and at each batch-sync boundary (see the fragment below) -
+    NOT every tick - so the numbers shown on-screen jump once per sync
+    instead of continuously gliding, which is the honest version of "smooth"
+    given this project's no-continuous-signal connectivity model. The
+    dispatch LOGIC (urgent_fn/close_fn in _run_fleet) deliberately does NOT
+    use this snapshot - it keeps reading live truth every tick, since that's
+    the algorithm working, not a display."""
+    snap = {}
+    for h in households:
+        temp_c, _ = fetch_current_temp_c(COMMUNITIES[h.community]["lat"], COMMUNITIES[h.community]["lon"])
+        residual = chlorine_residual_now(h, temp_c, now)
+        w_pct = 100 * (1 - current_used_l(h, now) / h.tank_capacity_l)
+        s_pct = current_sewage_pct(h, now)
+        p_pct = potability_pct(residual)
+        water_variant, water_label = _water_variant(h, temp_c, now)
+        sew_variant, sew_label = _sewage_variant(h, now)
+        worst_variant = water_variant if RANK[water_variant] >= RANK[sew_variant] else sew_variant
+        snap[h.id] = {
+            "residual": residual, "w_pct": w_pct, "s_pct": s_pct, "p_pct": p_pct,
+            "water_variant": water_variant, "water_label": water_label,
+            "sew_variant": sew_variant, "sew_label": sew_label,
+            "worst_variant": worst_variant,
+        }
+    return snap
+
+
 def _water_urgent(h, temp_c, now) -> bool:
     """Dispatch trigger for a WATER-delivery truck: already high (empty tank
     or unsafe chlorine) OR predicted to cross into trouble soon — water-only
@@ -389,7 +441,7 @@ _FLEET_MAP_STYLE = {
 }
 
 
-def render_truck_map(community: str, water_trucks: list, sewage_trucks: list, hh_here: list, temp_c: float, now: datetime) -> None:
+def render_truck_map(community: str, water_trucks: list, sewage_trucks: list, hh_here: list, snapshot: dict, now: datetime) -> None:
     f_lat, f_lon = facility_position(community)
 
     facility_layer = pdk.Layer(
@@ -415,7 +467,11 @@ def render_truck_map(community: str, water_trucks: list, sewage_trucks: list, hh
     highlight_points = []
     for h in hh_here:
         h_lat, h_lon = _jittered_position(h.id, COMMUNITIES[community]["lat"], COMMUNITIES[community]["lon"])
-        worst, _, _ = _worst_variant(h, temp_c, now)
+        # Dot color reflects the last BATCH-SYNCED status, not live truth -
+        # same honesty rule as the household cards below (see
+        # _compute_snapshot). Falls back to "low" only before the very first
+        # sync has fired.
+        worst = snapshot.get(h.id, {}).get("worst_variant", "low")
         color = {"low": PYDECK_RGB["pine"], "medium": PYDECK_RGB["gold"], "high": PYDECK_RGB["maple"]}[worst]
         point = {"lat": h_lat, "lon": h_lon, "label": f"{h.id} ({worst})", "color": color}
         household_points.append(point)
@@ -615,12 +671,46 @@ def sim_tick():
         _run_fleet(community, "water", water_trucks[community], hh_here, temp_c, now)
         _run_fleet(community, "sewage", sewage_trucks[community], hh_here, temp_c, now)
 
+    # --- batch sync boundary: household sensor readings only refresh here,
+    # not every tick (see _compute_snapshot). Dispatch logic above already
+    # ran on live truth this tick regardless - this only gates what gets
+    # DISPLAYED. ---
+    next_sync_at = st.session_state.sim_last_sync + timedelta(minutes=batch_sync_minutes)
+    just_synced = False
+    if not st.session_state.sim_synced_snapshot or now >= next_sync_at:
+        st.session_state.sim_last_sync = now
+        st.session_state.sim_synced_snapshot = _compute_snapshot(households, now)
+        next_sync_at = now + timedelta(minutes=batch_sync_minutes)
+        just_synced = True
+    minutes_since_sync = (now - st.session_state.sim_last_sync).total_seconds() / 60.0
+    minutes_until_sync = max(0.0, (next_sync_at - now).total_seconds() / 60.0)
+
     # --- render ---
     time_col, serviced_col = st.columns(2)
     with time_col:
         st.metric("Simulated time", now.strftime("%Y-%m-%d %H:%M"))
     with serviced_col:
         st.metric("Households filled/emptied so far", st.session_state.sim_total_serviced)
+
+    sync_col1, sync_col2 = st.columns(2)
+    with sync_col1:
+        st.metric(
+            "\U0001F4E1 Last synced", f"{minutes_since_sync:.0f} min ago",
+            help=f"Simulated time of last batch sync: {st.session_state.sim_last_sync.strftime('%Y-%m-%d %H:%M')}",
+        )
+    with sync_col2:
+        st.metric("Next batch sync in", f"{minutes_until_sync:.0f} min")
+    st.markdown(
+        flatten_html("""
+        <div class="hfh-alert hfh-alert-info">
+          Real deployment: data batches whenever a connection is available (at the plant, at a house, or
+          via a radio check-in) &mdash; not continuous live telemetry, since trucks have no signal in transit.
+        </div>
+        """),
+        unsafe_allow_html=True,
+    )
+    if just_synced:
+        st.success(f"\U0001F4E1 Batch sync completed at {now.strftime('%H:%M')} — household readings below just refreshed.")
 
     st.markdown("#### Trucks right now")
     st.caption(
@@ -629,7 +719,6 @@ def sim_tick():
     )
     for community in COMMUNITIES:
         hh_here = [h for h in households if h.community == community]
-        temp_c, _ = fetch_current_temp_c(COMMUNITIES[community]["lat"], COMMUNITIES[community]["lon"])
         n_water_active = sum(1 for t in water_trucks[community] if t["status"] == "en_route")
         n_sewage_active = sum(1 for t in sewage_trucks[community] if t["status"] == "en_route")
         st.markdown(f"**{community}** — \U0001F69A {n_water_active}/2 out &middot; \U0001F69B {n_sewage_active}/2 out")
@@ -666,29 +755,41 @@ def sim_tick():
                                     hh = next((x for x in hh_here if x.id == hid), None)
                                     if hh is None:
                                         continue
-                                    residual = chlorine_residual_now(hh, temp_c, now)
-                                    w_pct = 100 * (1 - current_used_l(hh, now) / hh.tank_capacity_l)
-                                    s_pct = current_sewage_pct(hh, now)
-                                    p_pct = potability_pct(residual)
+                                    # Manifest readings are also last-BATCH-SYNCED
+                                    # sensor data, not live - the dispatcher works
+                                    # off what was last reported, same as the
+                                    # household cards below.
+                                    hh_snap = st.session_state.sim_synced_snapshot.get(hh.id, {})
+                                    w_pct = hh_snap.get("w_pct", 0.0)
+                                    s_pct = hh_snap.get("s_pct", 0.0)
+                                    p_pct = hh_snap.get("p_pct", 0.0)
                                     st.caption(f"**{hh.id}** ({hh.tank_capacity_l}L) — water {w_pct:.0f}% · sewage {s_pct:.0f}% · potability {p_pct:.0f}%")
                         else:
                             st.caption(f"#{idx}: idle at plant")
 
     st.markdown(f"#### Live truck map — {map_community}")
     _map_hh_here = [h for h in households if h.community == map_community]
-    _map_temp_c, _ = fetch_current_temp_c(COMMUNITIES[map_community]["lat"], COMMUNITIES[map_community]["lon"])
-    render_truck_map(map_community, water_trucks[map_community], sewage_trucks[map_community], _map_hh_here, _map_temp_c, now)
+    render_truck_map(
+        map_community, water_trucks[map_community], sewage_trucks[map_community], _map_hh_here,
+        st.session_state.sim_synced_snapshot, now,
+    )
 
     if view_mode == "Households":
         st.markdown("#### Household status")
         cols = st.columns(3)
         for i, h in enumerate(households):
-            temp_c, _ = fetch_current_temp_c(COMMUNITIES[h.community]["lat"], COMMUNITIES[h.community]["lon"])
-            worst_variant, water_label, sew_label = _worst_variant(h, temp_c, now)
-            residual = chlorine_residual_now(h, temp_c, now)
-            water_remaining_pct = 100 * (1 - current_used_l(h, now) / h.tank_capacity_l)
-            sewage_pct = current_sewage_pct(h, now)
-            pot_pct = potability_pct(residual)
+            # Displayed sensor values are the last BATCH-SYNCED reading, not
+            # live truth every tick - see _compute_snapshot at the top of
+            # this module for why. Falls back to a neutral "low" placeholder
+            # for the handful of ticks before the very first sync fires.
+            hh_snap = st.session_state.sim_synced_snapshot.get(h.id, {})
+            worst_variant = hh_snap.get("worst_variant", "low")
+            water_label = hh_snap.get("water_label", "—")
+            sew_label = hh_snap.get("sew_label", "—")
+            residual = hh_snap.get("residual", 0.0)
+            water_remaining_pct = hh_snap.get("w_pct", 0.0)
+            sewage_pct = hh_snap.get("s_pct", 0.0)
+            pot_pct = hh_snap.get("p_pct", 0.0)
             being_served_water = any(
                 t["status"] == "en_route" and (t["target"] == h.id or h.id in t["batch"])
                 for t in water_trucks[h.community]
@@ -727,9 +828,16 @@ def sim_tick():
         summary_cols = st.columns(len(COMMUNITIES))
         for i, community in enumerate(COMMUNITIES):
             hh_here = [h for h in households if h.community == community]
-            temp_c, _ = fetch_current_temp_c(COMMUNITIES[community]["lat"], COMMUNITIES[community]["lon"])
-            approaching_sewage = sum(1 for h in hh_here if sewage_status(current_sewage_pct(h, now))[0] in CLOSE_ENOUGH_VARIANT)
-            approaching_water = sum(1 for h in hh_here if quality_status(chlorine_residual_now(h, temp_c, now))[0] in CLOSE_ENOUGH_VARIANT)
+            # Counts are also based on the last batch-synced reading per
+            # household, same honesty rule as the per-household cards above.
+            approaching_sewage = sum(
+                1 for h in hh_here
+                if st.session_state.sim_synced_snapshot.get(h.id, {}).get("sew_variant") in CLOSE_ENOUGH_VARIANT
+            )
+            approaching_water = sum(
+                1 for h in hh_here
+                if st.session_state.sim_synced_snapshot.get(h.id, {}).get("water_variant") in CLOSE_ENOUGH_VARIANT
+            )
             avg_consumption = sum(h.consumption_lpd for h in hh_here) / max(len(hh_here), 1)
             avg_sewage_rate = sum(h.sewage_fill_rate_pct_per_day for h in hh_here) / max(len(hh_here), 1)
             with summary_cols[i]:

@@ -3,6 +3,7 @@ in the demo. Nunavik is a 14-community region; this demo covers 4 of them."""
 
 import sys
 import os
+import math
 from datetime import datetime
 
 import pandas as pd
@@ -12,11 +13,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)) + "/..")
 from common import (  # noqa: E402
     COMMUNITIES, REGION_NAME, REGION_COMMUNITY_COUNT, get_households,
     fetch_current_temp_c, chlorine_residual_now, quality_status, sewage_status,
-    current_sewage_pct, predicted_needs_truck,
+    current_sewage_pct, current_used_l, predicted_needs_truck,
     PER_CAPITA_LOW_LPD, PER_CAPITA_HIGH_LPD, apply_theme, page_header, tank_svg,
     _jittered_position, badge_tt,
     _flatten_html as flatten_html,
 )
+import delivery_comparison_fullscale as dcf  # noqa: E402 - reuse its truck-capacity/round-trip/real-scale-count assumptions, don't reinvent them
 
 apply_theme()
 
@@ -183,6 +185,118 @@ for name in COMMUNITIES:
                     f"</div>",
                     unsafe_allow_html=True,
                 )
+
+st.subheader("Fleet capacity — surge / shortfall check")
+st.caption(
+    "Operational question: how many truckloads does each community need RIGHT NOW to refill every "
+    "household's water and pump out every sewage tank, how many trucks does that take, and how does "
+    "that compare to the 2 water + 2 sewage trucks each community actually runs?"
+)
+
+# ~10,000 L/load - same truck-capacity figure delivery_comparison_fullscale.py already uses to
+# volume-cap a batch, reused here rather than invented fresh.
+TRUCK_CAPACITY_L = dcf.TRUCK_CAPACITY_L
+# 2 trucks per type per community - matches pages/5_Simulation.py's _new_fleets() (2 water-delivery +
+# 2 sewage-pump trucks per community), the recent two-fleet-per-community change.
+ACTUAL_TRUCKS_PER_TYPE = 2
+
+fleet_rows = []
+for name, coords in COMMUNITIES.items():
+    hh_here = [h for h in households if h.community == name]
+    if not hh_here:
+        continue
+    # This demo only samples 12-25 households/community (see common._household_sample_size) - scale
+    # each household's demand up to the REAL household count for that population, the same real-scale
+    # sizing delivery_comparison_fullscale.py uses for its own full-population run.
+    real_hh_count = dcf.realscale_household_count(coords["population"])
+    scale = real_hh_count / len(hh_here)
+
+    # Water demand: liters it would take to top every household's tank back to full right now.
+    water_demand_l = sum(current_used_l(h, now) for h in hh_here) * scale
+    # Sewage demand: liters currently sitting in tanks waiting to be pumped out.
+    sewage_demand_l = sum(current_sewage_pct(h, now) / 100.0 * h.tank_capacity_l for h in hh_here) * scale
+
+    # Trips/truck/day: same mechanistic round-trip model (travel there+back + on-site service +
+    # facility turnaround) delivery_comparison_fullscale.py uses for its real-scale run, averaged
+    # over this community's household sample rather than a flat assumption.
+    avg_trip_minutes = sum(
+        dcf.trip_duration_for(name, h.id).total_seconds() / 60.0 for h in hh_here
+    ) / len(hh_here)
+    trips_per_truck_per_day = (24 * 60) / avg_trip_minutes
+
+    def _fleet_calc(demand_l: float) -> tuple[int, int, int]:
+        truckloads = math.ceil(demand_l / TRUCK_CAPACITY_L)
+        trucks_needed = math.ceil(truckloads / trips_per_truck_per_day) if truckloads else 0
+        shortfall = max(trucks_needed - ACTUAL_TRUCKS_PER_TYPE, 0)
+        return truckloads, trucks_needed, shortfall
+
+    w_loads, w_trucks, w_short = _fleet_calc(water_demand_l)
+    s_loads, s_trucks, s_short = _fleet_calc(sewage_demand_l)
+    fleet_rows.append({
+        "name": name, "water_demand_l": water_demand_l, "sewage_demand_l": sewage_demand_l,
+        "trips_per_truck_per_day": trips_per_truck_per_day,
+        "w_loads": w_loads, "w_trucks": w_trucks, "w_short": w_short,
+        "s_loads": s_loads, "s_trucks": s_trucks, "s_short": s_short,
+    })
+
+
+def _surge_badge(kind: str, short: int) -> str:
+    if short > 0:
+        return badge_tt(
+            f"{kind}: short {short} truck(s)", "high",
+            f"Needs {short} more {kind.lower()} truck(s) than the {ACTUAL_TRUCKS_PER_TYPE} on hand to clear today's demand.",
+        )
+    return badge_tt(
+        f"{kind}: sufficient", "low",
+        f"The {ACTUAL_TRUCKS_PER_TYPE} {kind.lower()} trucks on hand can cover today's demand.",
+    )
+
+
+for r in fleet_rows:
+    st.markdown(
+        flatten_html(f"""
+        <div class="hfh-card" style="margin-bottom:0.6rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.4rem;">
+            <strong style="font-size: var(--font-size-lg);">{r['name']}</strong>
+            <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+              {_surge_badge("Water", r['w_short'])}
+              {_surge_badge("Sewage", r['s_short'])}
+            </div>
+          </div>
+          <p style="margin:0.4rem 0 0 0; color: var(--color-ink-soft); font-size: var(--font-size-sm);">
+            Water: {r['water_demand_l']:,.0f} L needed now &rarr; {r['w_loads']} load(s) &divide; ~{r['trips_per_truck_per_day']:.1f} trips/truck/day &rarr; <strong>{r['w_trucks']} truck(s) needed</strong> (have {ACTUAL_TRUCKS_PER_TYPE}).<br/>
+            Sewage: {r['sewage_demand_l']:,.0f} L needing pump-out &rarr; {r['s_loads']} load(s) &rarr; <strong>{r['s_trucks']} truck(s) needed</strong> (have {ACTUAL_TRUCKS_PER_TYPE}).
+          </p>
+        </div>
+        """),
+        unsafe_allow_html=True,
+    )
+
+with st.expander("How the fleet-capacity numbers are calculated"):
+    st.markdown(
+        f"""
+        - **Demand**: for every monitored household, how many liters it would take to top its water tank
+          back to full right now (`current_used_l`), or how many liters are already sitting in its sewage
+          tank waiting to be pumped (`current_sewage_pct% x tank_capacity_l`) - summed across the community,
+          then scaled from this demo's household SAMPLE up to the real household count for that community's
+          population (`delivery_comparison_fullscale.realscale_household_count`).
+        - **Truck capacity**: ~{TRUCK_CAPACITY_L:,.0f} L/load - the same figure `delivery_comparison_fullscale.py`
+          uses to volume-cap a batch.
+        - **Truckloads needed**: `ceil(total_demand_liters / truck_capacity_liters)`.
+        - **Trips/truck/day**: derived from the same mechanistic round-trip model
+          `delivery_comparison_fullscale.trip_duration_for` uses - travel there and back at
+          {dcf.TRUCK_SPEED_KMH:.0f} km/h with a {dcf.ROAD_DETOUR_FACTOR}x road-detour factor, plus
+          {dcf.ONSITE_SERVICE_MINUTES:.0f} min on-site service and {dcf.TURNAROUND_MINUTES:.0f} min facility
+          turnaround per trip - averaged per community rather than a flat number.
+        - **Trucks needed**: `ceil(truckloads_needed / trips_per_truck_per_day)`, compared against the
+          actual {ACTUAL_TRUCKS_PER_TYPE} trucks of that type this community's fleet runs (see
+          pages/5_Simulation.py) to get the shortfall.
+        - This is a ceiling-division fleet-sizing estimate (related to the capacitated Inventory Routing
+          Problem in the OR literature), not a full vehicle-routing solve - neither `pulp` nor `ortools` was
+          available in this environment, so multi-truck scheduling conflicts (two trucks needed at the same
+          moment, etc.) aren't modeled here.
+        """
+    )
 
 with st.expander(f"About the other {REGION_COMMUNITY_COUNT - len(COMMUNITIES)} {REGION_NAME} communities"):
     st.markdown(

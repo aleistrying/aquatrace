@@ -216,11 +216,11 @@ with col_action:
 with st.expander("Sensor list used at the household stage"):
     st.markdown(
         """
-        | Measurement | Sensor type | Needs connectivity? | Maintenance note |
-        |---|---|---|---|
-        | Water tank level | Ultrasonic (non-contact) — same category piloted by Université Laval / Sentinel Nord in Kuujjuaq | No (local readout); relay for remote view | No wetted parts, freeze-tolerant |
-        | Water tank quality | Turbidity (optical/IR) + amperometric chlorine residual probe | No (local readout); relay for remote view | Amperometric preferred — no reagents to freeze or expire |
-        | Sewage tank level | Float switch (mechanical/magnetic reed) | No (local readout); relay for remote view | More failure-tolerant than ultrasonic in a corrosive-gas tank (no false readings from foam/condensation) |
-        | Backup button | Wired doorbell-style button, house power | Uses house's existing connectivity | No battery to fail, near-zero maintenance |
+        | Measurement | Sensor type | Needs connectivity? | Maintenance note | Cold-weather note |
+        |---|---|---|---|---|
+        | Water tank level | Ultrasonic (non-contact) — same category piloted by Université Laval / Sentinel Nord in Kuujjuaq | No (local readout); relay for remote view | No wetted parts, freeze-tolerant | Tank is indoors — sensor sees heated indoor air, not -49°C outside; no hardening needed |
+        | Water tank quality | Turbidity (optical/IR) + amperometric chlorine residual probe | No (local readout); relay for remote view | Amperometric preferred — no reagents to freeze or expire | Probe is submerged in tank water (stays above freezing indoors) — cold-safe by placement, not spec |
+        | Sewage tank level | Float switch (mechanical/magnetic reed) | No (local readout); relay for remote view | More failure-tolerant than ultrasonic in a corrosive-gas tank (no false readings from foam/condensation) | Tank is outdoors — mount float low to stay liquid-buffered, heat-trace/insulate the cable run and junction; add a mechanical sight-gauge as no-electronics backup |
+        | Backup button | Wired doorbell-style button, house power | Uses house's existing connectivity | No battery to fail, near-zero maintenance | Entirely indoors on house power — never touches outside ambient at all |
         """
     )

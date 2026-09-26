@@ -77,9 +77,9 @@ else:
 with st.expander("Sensor list used at this stage"):
     st.markdown(
         """
-        | Measurement | Sensor type | Connectivity need | Maintenance note |
-        |---|---|---|---|
-        | In-truck tank level | Capacitive or ultrasonic tank-level sender (same category as RV/marine tanks) | Standalone dash readout; becomes system data only via radio relay | Robust vehicle-grade sensor |
-        | Water actually dispensed | Inline flow meter (paddlewheel/turbine) on the delivery hose | Same as above | The real differentiator vs. just mirroring house sensors — confirms what left the truck, not just what's in the house tank |
+        | Measurement | Sensor type | Connectivity need | Maintenance note | Cold-weather note |
+        |---|---|---|---|---|
+        | In-truck tank level | Capacitive or ultrasonic tank-level sender (same category as RV/marine tanks) | Standalone dash readout; becomes system data only via radio relay | Robust vehicle-grade sensor | Vehicle-grade senders are commonly rated to -40°C (automotive standard) — spec explicitly for -49°C+ lows; heated cab readout, insulated tank compartment |
+        | Water actually dispensed | Inline flow meter (paddlewheel/turbine) on the delivery hose | Same as above | The real differentiator vs. just mirroring house sensors — confirms what left the truck, not just what's in the house tank | Hose/meter only sees flowing (self-warming) water during active transfer — main risk is the hose freezing between deliveries, not the meter's static rating; drain/blow out hose after each delivery |
         """
     )

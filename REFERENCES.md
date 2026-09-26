@@ -120,3 +120,114 @@ Note: multiple research passes this session hit a shared web-search budget limit
 findings could only be corroborated via training knowledge rather than a fresh live
 source, this is flagged above and in the underlying research — recommend a quick live
 re-check of any specific number before quoting it to judges as a citation.
+
+## Arctic sensor practicality (cold-weather hardening)
+
+Context: `Tanque_Agua_Potable.md` (the reference industrial-sensor spec doc this app is
+built alongside) lists operating-temperature ratings for every sensor — hydrostatic
+level (-10 to +80°C), EMF flow meters (0-60°C), pH (0-60°C), conductivity (-10 to
++60°C), turbidity (0-50°C), PT100 temperature (-10 to +60°C), amperometric chlorine
+(0-50°C) — and **none** cover Nunavik's documented -49.4°C lows, let alone a -60°C
+worst case. This section researches whether that's an actual deployment problem.
+Session note: this research hit the same shared web-search budget limit as earlier
+passes in this doc (WebSearch exhausted before these 5 queries could run); findings
+below come from targeted WebFetch of specific reference pages plus training-knowledge
+engineering practice, each flagged accordingly rather than presented as fresh citations.
+
+### 1. Is unrated ambient exposure actually a problem, or already solved?
+
+**Both** — it depends on where on the sensor the -49°C air actually touches.
+
+- **Sourced (WebFetch, Wikipedia "Heat tracing" article, this session):** heat
+  tracing/heat tape is a real, established freeze-protection technology — electrical
+  heating cable + insulation, thermostatically switched (typically on below 3-5°C,
+  off ~2°C above that) — explicitly used to protect "water service lines and tanks"
+  and "instrument tubing," standard across utility, oil/gas, and chemical-industry
+  cold-climate installations. This confirms the *mechanism* proposed below is a real,
+  commercially normal pattern, not a hackathon invention.
+- **Reasoned-estimate (training knowledge, high confidence — standard industrial
+  instrumentation practice):** manufacturer "operating temperature" ratings on
+  wetted/submersible sensors (hydrostatic level, pH/conductivity/turbidity/chlorine
+  probes, PT100 in a thermowell) describe the **process-fluid** temperature the
+  sensing element sees, not outside air — because these sensors are designed to be
+  installed submerged or in a wetted bypass line. A Nunavik household cistern is kept
+  indoors specifically to avoid freezing (already noted above in this file), so its
+  water sits around 0-20°C year-round regardless of -49°C outside air; a submerged
+  sensor in that tank is never actually exposed to the extreme low it's "unrated" for.
+  The real exposure point is the **electronics** (transmitter head, PLC, terminal
+  blocks, exposed cable) — and Arctic/northern water-treatment practice puts those
+  inside a heated plant room or a small insulated/heat-traced enclosure with a
+  low-wattage thermostatic heater, which is exactly the same category of solution the
+  Wikipedia source confirms is real and widely deployed. **Conclusion: this is a
+  well-established, "already solved" pattern for anything liquid-buffered or indoors —
+  not a novel problem this project needs to invent new sensor hardware for.** It only
+  remains a live problem for anything sitting in dry outdoor ambient air, which in
+  this project's design is essentially just the sewage tank (see Q2).
+
+### 2. The outdoor sewage tank specifically
+
+**Reasoned-estimate (training knowledge — established wastewater/level-instrumentation
+practice; live citation not obtained this session due to search-budget exhaustion):**
+
+- This is the one point in the whole sensor set where the "liquid buffers the sensor"
+  argument above doesn't fully apply, because a level reading (whether float or
+  non-contact) inherently involves the air gap/headspace above the waste, which *is*
+  at outside ambient in an uninsulated outdoor tank.
+- Real, purchasable solutions exist for exactly this case: heated-faceplate ultrasonic
+  or radar level transmitters and heat-traced standpipes are an established product
+  category for outdoor wastewater lift stations and holding tanks in cold-climate
+  regions (Canada/northern US) — not speculative, but a known line item in cold-climate
+  wastewater engineering.
+- However, for this project's actual proposed sensor (a float/reed switch, not a
+  continuous non-contact sensor), the simpler and arguably more robust fix is
+  **placement, not new hardware**: mount the float low enough that the float body and
+  reed contact stay submerged/liquid-buffered rather than sitting in the dry headspace,
+  and keep the switch's junction/terminal point in a small insulated or lightly heated
+  deck box rather than bare-exposed. The genuinely fragile part is then the **signal
+  cable run** through the tank wall to the (heated, indoor) relay — a wiring-freeze/
+  conduit-crack risk, solved with standard heat-traced or direct-bury conduit practice,
+  not an exotic sensor spec.
+- As true belt-and-suspenders backup, a **zero-electronics mechanical sight-gauge or
+  dipstick/float-rod indicator** (the same category used on remote septic/holding
+  tanks for decades, precisely because nothing in it can fail from cold — no battery,
+  no electronics) is a practical, low-cost manual-fallback addition, philosophically
+  identical to this project's own backup-button pattern applied to level instead of
+  self-reported status.
+
+### 3. Sensor failure mode: fault detection and manual fallback
+
+**Reasoned-estimate (training knowledge — standard, textbook industrial-controls
+practice; ISA-18.2 alarm management and the 4-20 mA "live zero" convention are
+established industry standards, but a fresh single-URL citation was not obtained this
+session due to the exhausted search budget):**
+
+- The 4-20 mA "live zero" convention that `Tanque_Agua_Potable.md`'s own wiring already
+  uses exists **specifically** to make this distinction: 4 mA = 0% of range (a valid
+  reading), while a broken loop reads 0 mA or drifts out of the 4-20 mA envelope
+  entirely — competent PLC logic flags anything below ~3.6 mA or above ~20.5 mA as
+  **sensor fault**, not as a valid low/high reading. This is exactly the "don't
+  silently report 0 as normal" behavior the research question describes, and it's a
+  decades-old standard convention, not something this project would need to invent.
+- SCADA/HMI best practice (ISA-18.2 alarm management) further separates "last known
+  good reading, with a staleness/age indicator" from an explicit FAULT/OFFLINE flag,
+  rather than ever displaying a frozen or default value as if it were current.
+- Manual fallback when telemetry fails — operators reverting to a manually-read gauge,
+  radio/phone call-in, or paper log — is a real and common operational pattern in
+  small/rural water utilities specifically *because* many of them run with partial or
+  intermittent SCADA coverage already. This project's "backup button" concept (a
+  human-reported status channel that exists independent of automated sensors) is
+  consistent with, not a simplification of, real remote-utility operational practice.
+- Redundancy is also real practice for the highest public-health-stakes measurement
+  here (chlorine residual): amperometric probes are known to drift/foul, so periodic
+  manual grab-sample verification is standard regardless of whether telemetry is
+  healthy — cold-related sensor failure is just one more reason this manual check
+  channel needs to exist, not a new requirement it creates.
+
+### 4. Per-sensor Arctic-hardening recommendation (the 4 sensors this project proposes)
+
+| Sensor | Needs heated enclosure? | Why | Realistic maintenance burden |
+|---|---|---|---|
+| Ultrasonic tank level (water cistern) | No | Tank is indoors/insulated by design (already noted elsewhere in this file); sensor sees heated indoor air, never -49°C outside air | Near-zero — no wetted parts; occasional wipe for condensation/frost on the transducer face after the tank lid is opened in winter |
+| Turbidity + amperometric chlorine probe | No (probe); yes for any outdoor wiring/relay run | Probe is submerged in tank water that stays above freezing indoors; only exposed cable runs would need heat-trace/insulated conduit if the relay isn't indoors | Electrode fouling/replacement (6-12 month life, per `Tanque_Agua_Potable.md`) dominates — unchanged by being in the Arctic specifically |
+| Sewage float switch (outdoor tank) | Partially — insulated/lightly heated deck box for the switch junction, not the whole tank | The one sensor with real dry-ambient exposure risk (headspace above the waste); mount low to stay liquid-buffered, heat-trace/direct-bury the signal cable | Low if placement is right; winter check that the cable entry hasn't frozen/cracked; mechanical sight-gauge as zero-electronics manual backup recommended |
+| Wired backup button (house power) | No | Entirely indoors on house power — never touches outside ambient at all | Near-zero — no battery, simple mechanical switch (as already noted in the sensor table) |
