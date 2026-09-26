@@ -1,0 +1,33 @@
+{
+  "generated_at": "2026-09-26T14:09:25.124835",
+  "tick_minutes": 30,
+  "trip_minutes": 45.0,
+  "baseline_coverage_days": {
+    "Inukjuak": 1.0625,
+    "Kuujjuaraapik": 0.5625,
+    "Puvirnituq": 1.1041666666666667,
+    "Kangiqsujuaq": 0.5208333333333334
+  },
+  "optimized_coverage_days": {
+    "Inukjuak": 1.2291666666666667,
+    "Kuujjuaraapik": 1.0625,
+    "Puvirnituq": 2.6041666666666665,
+    "Kangiqsujuaq": 1.8125
+  },
+  "baseline_bad_state_household_days": {
+    "Inukjuak": 6.354166666666644,
+    "Kuujjuaraapik": 1.5624999999999987,
+    "Puvirnituq": 6.958333333333302,
+    "Kangiqsujuaq": 2.520833333333334
+  },
+  "optimized_bad_state_household_days": {
+    "Inukjuak": 0.4999999999999998,
+    "Kuujjuaraapik": 0.20833333333333334,
+    "Puvirnituq": 0.6875000000000001,
+    "Kangiqsujuaq": 0.3749999999999999
+  },
+  "baseline_avg_coverage_days": 0.8125,
+  "optimized_avg_coverage_days": 1.6770833333333333,
+  "baseline_total_bad_state_days": 17.39583333333328,
+  "optimized_total_bad_state_days": 1.770833333333333
+}
