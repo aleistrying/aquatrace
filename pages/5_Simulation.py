@@ -575,7 +575,17 @@ def _run_fleet(community: str, kind: str, fleet: list, hh_here: list, temp_c: fl
 
             urgent = [h for h in hh_here if h.id not in already_assigned and urgent_fn(h)]
             if urgent:
-                primary = urgent[0]
+                # Oldest-serviced-first tiebreak, NOT first-in-list-order:
+                # picking urgent[0] would always favor whichever household
+                # happens to sort first (effectively low-id households),
+                # since a household that cycles back into "urgent" quickly
+                # would keep out-ranking one that's been waiting since day 1.
+                # last_delivery / record_start already ARE each household's
+                # "last serviced" timestamp for water / sewage respectively
+                # (reset on arrival - see below), so picking the minimum
+                # directly prioritizes whoever has gone longest without
+                # service among the currently-urgent households.
+                primary = min(urgent, key=lambda h: h.last_delivery if is_water else h.record_start)
                 # Batch-service: the truck is going anyway, so also swing by
                 # anyone else in the community close enough to this SAME
                 # need type (medium/high, or predicted within the wider
