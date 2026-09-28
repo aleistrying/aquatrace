@@ -11,7 +11,7 @@
  * data itself is still the same statically-imported JSON, read and rendered
  * exactly as before, nothing server-only was in use here anyway.
  */
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import PageHeader from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import InfoIcon from "@/components/InfoIcon";
@@ -106,7 +106,7 @@ function StatTile({
 
 function Legend() {
   return (
-    <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12, fontSize: "0.76rem", color: "var(--ink-soft)" }}>
+    <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 6, fontSize: "0.76rem", color: "var(--ink-soft)" }}>
       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
         <span style={{ width: 10, height: 10, borderRadius: 3, background: BASELINE_COLOR, display: "inline-block" }} />
         {BASELINE_LABEL}
@@ -114,6 +114,150 @@ function Legend() {
       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
         <span style={{ width: 10, height: 10, borderRadius: 3, background: OPTIMIZED_COLOR, display: "inline-block" }} />
         {OPTIMIZED_LABEL}
+      </span>
+    </div>
+  );
+}
+
+/** A small triangular up/down/flat indicator — used everywhere a
+ * baseline-vs-optimized delta needs to read at a glance without requiring
+ * the "-"/"+" sign or "faster"/"slower" wording to be parsed first. */
+function DeltaArrowIcon({ direction, color, size = 10 }: { direction: "up" | "down" | "flat"; color: string; size?: number }) {
+  if (direction === "flat") {
+    return (
+      <svg width={size} height={size} viewBox="0 0 10 10" aria-hidden="true" style={{ flexShrink: 0 }}>
+        <rect x="1" y="4.2" width="8" height="1.6" rx="0.8" fill={color} />
+      </svg>
+    );
+  }
+  const points = direction === "down" ? "1,2 9,2 5,9" : "1,8 9,8 5,1";
+  return (
+    <svg width={size} height={size} viewBox="0 0 10 10" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <polygon points={points} fill={color} />
+    </svg>
+  );
+}
+
+/** Pass/fail check mark — reinforces the reference-check badge's color with
+ * a shape too, so the result doesn't rely on hue alone. */
+function StatusIcon({ ok, size = 13 }: { ok: boolean; size?: number }) {
+  const color = ok ? "var(--green)" : "var(--danger)";
+  return ok ? (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <polyline points="4 12 9 17 20 6" />
+    </svg>
+  ) : (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth={3} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <line x1="5" y1="5" x2="19" y2="19" />
+      <line x1="19" y1="5" x2="5" y2="19" />
+    </svg>
+  );
+}
+
+/** Small gear glyph flagging the model-parameters disclosure as a
+ * methodology/config panel (kept collapsed by default, see the <details>
+ * it labels in the Retries & methodology tab). */
+function GearIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82A1.65 1.65 0 0 0 3 13.09H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+/**
+ * The "headline comparison" for a per-community chart: one big baseline
+ * number, one big optimized number, and a single delta pill — so the
+ * viewer gets the gist without reading all 4 community rows first. The
+ * per-community detail stays right below it (rule: detail still reachable,
+ * just visually subordinate to this headline).
+ */
+function ChartHeadline({
+  baselineValue,
+  optimizedValue,
+  fmt,
+  unit,
+  deltaMode,
+}: {
+  baselineValue: number;
+  optimizedValue: number;
+  fmt: (n: number) => string;
+  unit: string;
+  deltaMode: "days" | "percent" | "count";
+}) {
+  const delta = baselineValue - optimizedValue; // positive = optimized (this app's system) is lower/better
+  const improved = delta > 0;
+  const flat = delta === 0;
+  const direction: "up" | "down" | "flat" = flat ? "flat" : improved ? "down" : "up";
+  const color = flat ? "var(--ink-soft)" : improved ? "var(--green)" : "var(--danger)";
+  const bg = flat ? "var(--surface)" : improved ? "var(--green-tint)" : "var(--danger-tint)";
+  const sign = flat ? "" : improved ? "-" : "+";
+  const abs = Math.abs(delta);
+
+  let deltaText: string;
+  if (deltaMode === "percent") {
+    const pct = baselineValue !== 0 ? Math.abs((100 * delta) / baselineValue) : 0;
+    deltaText = flat ? "no change" : `${sign}${pct.toFixed(0)}% ${improved ? "fewer" : "more"}`;
+  } else if (deltaMode === "count") {
+    deltaText = flat ? "no change" : `${sign}${fmt(abs)} ${improved ? "fewer" : "more"}`;
+  } else {
+    deltaText = flat ? "no change" : `${sign}${fmt(abs)}${unit} ${improved ? "faster" : "slower"}`;
+  }
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: 8,
+        padding: "5px 10px",
+        marginBottom: 6,
+        borderRadius: 8,
+        background: "var(--surface-raised)",
+      }}
+    >
+      <span style={{ fontSize: "0.68rem", color: "var(--ink-soft)" }}>{BASELINE_LABEL}</span>
+      <strong style={{ fontSize: "1.05rem", color: BASELINE_COLOR, fontVariantNumeric: "tabular-nums" }}>
+        {fmt(baselineValue)}
+        {unit}
+      </strong>
+      <span style={{ fontSize: "0.7rem", color: "var(--ink-soft)" }}>vs</span>
+      <span style={{ fontSize: "0.68rem", color: "var(--ink-soft)" }}>{OPTIMIZED_LABEL}</span>
+      <strong style={{ fontSize: "1.05rem", color: OPTIMIZED_COLOR, fontVariantNumeric: "tabular-nums" }}>
+        {fmt(optimizedValue)}
+        {unit}
+      </strong>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 5,
+          padding: "3px 10px",
+          borderRadius: 99,
+          background: bg,
+          color,
+          fontWeight: 700,
+          fontSize: "0.78rem",
+          marginLeft: "auto",
+          fontVariantNumeric: "tabular-nums",
+        }}
+        title="Headline comparison across all 4 communities combined"
+      >
+        <DeltaArrowIcon direction={direction} color={color} />
+        {deltaText}
       </span>
     </div>
   );
@@ -142,18 +286,32 @@ function AnimatedBarFill({ pct, color, title }: { pct: number; color: string; ti
 function BarGroupChart({
   title,
   caption,
+  infoNote,
   baseline,
   optimized,
   unit,
   digits = 1,
+  headlineBaseline,
+  headlineOptimized,
+  headlineDeltaMode = "days",
   style,
 }: {
   title: string;
   caption: string;
+  /** Extra "why it matters" detail, tucked behind an InfoIcon next to the
+   * title instead of sitting in the always-visible caption. */
+  infoNote?: ReactNode;
   baseline: CommunityMap;
   optimized: CommunityMap;
   unit: string;
   digits?: number;
+  /** The single headline comparison for this chart (already-aggregated
+   * real numbers from the same source JSON as the per-community rows below
+   * — e.g. the JSON's own precomputed average/total, or a plain sum of the
+   * exact per-community values rendered here). */
+  headlineBaseline: number;
+  headlineOptimized: number;
+  headlineDeltaMode?: "days" | "percent" | "count";
   style?: CSSProperties;
 }) {
   const max = Math.max(...COMMUNITY_NAMES.flatMap((c) => [baseline[c] ?? 0, optimized[c] ?? 0]), 1);
@@ -168,8 +326,11 @@ function BarGroupChart({
     <div className="card" style={{ height: "100%", minHeight: 0, overflow: "auto", ...style }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <div>
-          <h3 style={{ fontSize: "1.0rem", marginBottom: 2 }}>{title}</h3>
-          <p style={{ margin: "0 0 8px 0", fontSize: "0.76rem", color: "var(--ink-soft)" }}>{caption}</p>
+          <h3 style={{ fontSize: "1.0rem", marginBottom: 2, display: "flex", alignItems: "center", gap: 6 }}>
+            {title}
+            {infoNote && <InfoIcon label={`Why this matters: ${title}`}>{infoNote}</InfoIcon>}
+          </h3>
+          <p style={{ margin: "0 0 6px 0", fontSize: "0.76rem", color: "var(--ink-soft)" }}>{caption}</p>
         </div>
         <button
           type="button"
@@ -189,6 +350,13 @@ function BarGroupChart({
           {showTable ? "Chart view" : "Table view"}
         </button>
       </div>
+      <ChartHeadline
+        baselineValue={headlineBaseline}
+        optimizedValue={headlineOptimized}
+        fmt={fmt}
+        unit={unit}
+        deltaMode={headlineDeltaMode}
+      />
       {showTable ? (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 4, fontSize: "0.78rem", minWidth: 320 }}>
@@ -218,25 +386,31 @@ function BarGroupChart({
         </div>
       ) : (
         <>
+      <div className="eyebrow" style={{ marginBottom: 4 }}>By community</div>
       <Legend />
       {/* Grouped bars are kept compact (smaller bar height/gaps than a
           standalone page version) so 4 communities x 2 bars fits within a
           single-screen tab panel, incl. when placed side-by-side with a
-          sibling chart - see statistics/page.tsx header comment. */}
-      <div style={{ display: "grid", gap: 11 }}>
-        {COMMUNITY_NAMES.map((c) => {
+          sibling chart - see statistics/page.tsx header comment. Rows are
+          zebra-striped so 4 near-identical blocks read as one clean
+          comparison rather than 4 repeated mini-charts. */}
+      <div style={{ display: "grid", gap: 5 }}>
+        {COMMUNITY_NAMES.map((c, idx) => {
           const b = baseline[c] ?? 0;
           const o = optimized[c] ?? 0;
           const delta = b - o; // positive = optimized (this app's system) is lower/better on this metric
           const deltaBg = delta > 0 ? "var(--green-tint)" : delta < 0 ? "var(--danger-tint)" : "var(--surface-raised)";
           const deltaColor = delta > 0 ? "var(--green)" : delta < 0 ? "var(--danger)" : "var(--ink-soft)";
-          const deltaArrow = delta > 0 ? "▼" : delta < 0 ? "▲" : "=";
+          const deltaDirection: "up" | "down" | "flat" = delta > 0 ? "down" : delta < 0 ? "up" : "flat";
           return (
-          <div key={c}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+          <div key={c} style={{ background: idx % 2 === 1 ? "var(--surface-raised)" : "transparent", borderRadius: 8, padding: "3px 6px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, flexWrap: "wrap" }}>
               <span style={{ fontSize: "0.8rem", fontWeight: 700 }}>{c}</span>
               <span
                 style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
                   fontSize: "0.68rem",
                   fontWeight: 700,
                   padding: "1px 7px",
@@ -253,7 +427,8 @@ function BarGroupChart({
                       : `No difference between strategies for ${c}.`
                 }
               >
-                {deltaArrow} {fmt(Math.abs(delta))}
+                <DeltaArrowIcon direction={deltaDirection} color={deltaColor} size={8} />
+                {fmt(Math.abs(delta))}
                 {unit}
               </span>
             </div>
@@ -261,7 +436,7 @@ function BarGroupChart({
               { label: BASELINE_LABEL, value: baseline[c] ?? 0, color: BASELINE_COLOR },
               { label: OPTIMIZED_LABEL, value: optimized[c] ?? 0, color: OPTIMIZED_COLOR },
             ] as const).map((s) => (
-              <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+              <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
                 <div
                   style={{
                     flex: 1,
@@ -307,6 +482,13 @@ export default function StatisticsPage() {
     100 * (1 - data.optimized_total_bad_state_days / data.baseline_total_bad_state_days);
   const passed = data.reference_check_14_16_days_passed;
 
+  // Sums of the exact per-community retry counts rendered in the Retries
+  // chart below — a plain aggregation of already-real data, not a new
+  // invented figure (the JSON has no precomputed retries total/avg, unlike
+  // coverage/bad-state which already carry one).
+  const baselineRetriesTotal = COMMUNITY_NAMES.reduce((s, c) => s + (data.baseline_retries[c] ?? 0), 0);
+  const optimizedRetriesTotal = COMMUNITY_NAMES.reduce((s, c) => s + (data.optimized_retries[c] ?? 0), 0);
+
   // --- Tab 1: Summary — the "is this real" banner + the 4 headline stats,
   // all of which fit comfortably in one screen with room to spare.
   const summaryTab = (
@@ -322,11 +504,17 @@ export default function StatisticsPage() {
           borderColor: "var(--teal)",
         }}
       >
-        <Badge label="Real simulation, not invented" variant="low" />
-        <Badge
-          label={passed ? "Reference check: within ~14–16d range" : "Reference check: outside range"}
-          variant={passed ? "low" : "medium"}
-        />
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <StatusIcon ok />
+          <Badge label="Real simulation, not invented" variant="low" />
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <StatusIcon ok={passed} />
+          <Badge
+            label={passed ? "Reference check: within ~14–16d range" : "Reference check: outside range"}
+            variant={passed ? "low" : "high"}
+          />
+        </span>
         <InfoIcon label="About these numbers">
           Numbers come from an actual run of delivery_comparison_fullscale.py over real-scale households (500/188 per
           community), not hand-picked. Baseline (blind rotation) reproduces the independently-cited ~14&ndash;16 day
@@ -358,12 +546,6 @@ export default function StatisticsPage() {
           delta={`-${reduction.toFixed(0)}%`}
         />
       </div>
-
-      <p style={{ fontSize: "0.82rem", color: "var(--ink-soft)", margin: 0 }}>
-        See the <strong>Coverage &amp; bad-state</strong> and <strong>Retries &amp; methodology</strong> tabs above
-        for the same comparison broken down by community, and <strong>Cross-reference</strong> for the small-sample
-        demo numbers alongside these full-scale ones.
-      </p>
     </div>
   );
 
@@ -379,15 +561,22 @@ export default function StatisticsPage() {
         optimized={data.optimized_coverage_days}
         unit=" d"
         digits={1}
+        headlineBaseline={data.baseline_avg_coverage_days}
+        headlineOptimized={data.optimized_avg_coverage_days}
+        headlineDeltaMode="days"
         style={{ flex: "1 1 0", minWidth: 0 }}
       />
       <BarGroupChart
         title="Household-days spent in a bad state, by community"
-        caption="Total household-days spent at a 'high' (bad) water or sewage status — this is where predictive+batch wins even though it doesn't win on raw coverage speed."
+        caption="Total household-days spent at a 'high' (bad) water or sewage status."
+        infoNote="This is where predictive+batch wins even though it doesn't win on raw coverage speed."
         baseline={data.baseline_bad_state_household_days}
         optimized={data.optimized_bad_state_household_days}
         unit=""
         digits={0}
+        headlineBaseline={data.baseline_total_bad_state_days}
+        headlineOptimized={data.optimized_total_bad_state_days}
+        headlineDeltaMode="percent"
         style={{ flex: "1 1 0", minWidth: 0 }}
       />
     </div>
@@ -405,10 +594,16 @@ export default function StatisticsPage() {
         optimized={data.optimized_retries}
         unit=""
         digits={0}
+        headlineBaseline={baselineRetriesTotal}
+        headlineOptimized={optimizedRetriesTotal}
+        headlineDeltaMode="count"
         style={{ flex: "1 1 55%", minWidth: 0 }}
       />
       <details className="card" style={{ flex: "1 1 45%", minWidth: 0, height: "100%", overflow: "auto" }}>
-        <summary style={{ cursor: "pointer", fontWeight: 600 }}>Model parameters used</summary>
+        <summary style={{ cursor: "pointer", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <GearIcon />
+          Model parameters used
+        </summary>
         <div style={{ marginTop: 10, overflowX: "auto" }}>
           <table style={{ borderCollapse: "collapse", fontSize: "0.8rem", fontFamily: "var(--font-mono)" }}>
             <tbody>

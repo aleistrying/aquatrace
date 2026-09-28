@@ -60,6 +60,22 @@ interface RadioLogEntry {
   householdId: string; // "—" when not applicable
 }
 
+// The one fleet-wide "at a glance" number worth surfacing above the log
+// itself: how many of the 4 trucks are currently en route / delayed / idle.
+// Derived purely from each truck's own most recent radio check-in below —
+// never a separate or fabricated figure.
+type FleetBucket = "enRoute" | "delayed" | "idle";
+function bucketForStatus(status: string | undefined): FleetBucket {
+  if (status === "En route") return "enRoute";
+  if (status?.startsWith("Delayed")) return "delayed";
+  return "idle"; // Delivered, Returning to facility, or no check-in radioed in yet
+}
+const FLEET_BUCKET_META: Record<FleetBucket, { label: string; color: string }> = {
+  enRoute: { label: "en route", color: "var(--teal)" },
+  delayed: { label: "delayed", color: "var(--gold)" },
+  idle: { label: "idle / no active run", color: "var(--ink-soft)" },
+};
+
 export default function TruckPage() {
   const households = useHouseholds();
 
@@ -87,9 +103,18 @@ export default function TruckPage() {
 
   const recent = [...log].slice(-10).reverse();
 
+  // Latest known status per truck — `log` is append-only chronological, so
+  // the last matching entry for a given truck id is its "current" one.
+  const latestStatusByTruck: Record<string, string | undefined> = {};
+  for (const entry of log) latestStatusByTruck[entry.truckId] = entry.status;
+  const fleetCounts: Record<FleetBucket, number> = { enRoute: 0, delayed: 0, idle: 0 };
+  for (const t of TRUCK_FLEET) fleetCounts[bucketForStatus(latestStatusByTruck[t.id])]++;
+
   return (
     <SingleScreenPage>
       <PageHeader title="Truck" subtitle="No cell/internet signal in transit — radio only" />
+
+      <FleetStatusStrip counts={fleetCounts} total={TRUCK_FLEET.length} />
 
       {/* Two columns instead of the original stacked layout: the log-entry
           form (left, fixed width) and the recent check-ins rail (right,
@@ -217,7 +242,14 @@ export default function TruckPage() {
             >
               Log radio check-in
             </button>
-            {successMsg && <p style={{ color: "var(--green)", fontSize: "0.85rem", fontWeight: 600, margin: 0 }}>{successMsg}</p>}
+            {successMsg && (
+              <p style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--green)", fontSize: "0.85rem", fontWeight: 600, margin: 0 }}>
+                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+                  <path d="M4.5 12.5 L9.5 17.5 L19.5 6" />
+                </svg>
+                {successMsg}
+              </p>
+            )}
           </form>
         </div>
 
@@ -248,7 +280,11 @@ export default function TruckPage() {
                       <div className="aq-checkin-marker" style={{ background: meta.tint }}>
                         <StatusGlyph status={entry.status} color={meta.color} />
                       </div>
-                      <div className="card" style={{ flex: 1, minWidth: 0, padding: "0.6rem 0.85rem" }}>
+                      {/* A compact divider-separated row, not a repeated
+                          bordered card per entry — the rail's own dot+line
+                          already carries the "this is a list of events"
+                          structure, so each row only needs its own content. */}
+                      <div style={{ flex: 1, minWidth: 0, padding: "0.1rem 0 0.55rem", borderBottom: "1px solid var(--border)" }}>
                         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "0.5rem" }}>
                           <strong style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem" }}>
                             {new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}
@@ -386,6 +422,50 @@ function StatusGlyph({ status, color }: { status: string; color: string }) {
     <svg {...common}>
       <path d="M12 3 V21 M5.5 6.5 L18.5 17.5 M18.5 6.5 L5.5 17.5" />
     </svg>
+  );
+}
+
+/**
+ * The one big-number "at a glance" readout for this page: how many of the
+ * fleet's 4 trucks are currently en route / delayed / idle, derived from
+ * each truck's own latest radio check-in (bucketForStatus) so a dispatcher
+ * doesn't have to read the whole log below just to answer "where's my
+ * fleet right now?".
+ */
+function FleetStatusStrip({ counts, total }: { counts: Record<FleetBucket, number>; total: number }) {
+  const order: FleetBucket[] = ["enRoute", "delayed", "idle"];
+  return (
+    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "1.6rem", flexShrink: 0, margin: "0.1rem 0 0.9rem" }}>
+      <span
+        style={{
+          fontSize: "0.72rem",
+          fontWeight: 700,
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+          color: "var(--ink-soft)",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 5,
+        }}
+      >
+        Fleet status
+        <InfoIcon label="How fleet status is worked out">
+          Each truck&apos;s status is its most recent radio check-in logged on this page. &quot;Idle&quot; covers a
+          truck that has delivered, returned to the facility, or hasn&apos;t checked in yet this session.
+        </InfoIcon>
+      </span>
+      {order.map((key) => {
+        const meta = FLEET_BUCKET_META[key];
+        return (
+          <div key={key} style={{ display: "flex", alignItems: "baseline", gap: 7 }}>
+            <span style={{ fontSize: "1.75rem", fontWeight: 800, color: meta.color, lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+              {counts[key]}
+            </span>
+            <span style={{ fontSize: "0.8rem", color: "var(--ink-soft)" }}>/ {total} {meta.label}</span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

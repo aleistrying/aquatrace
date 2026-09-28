@@ -172,19 +172,58 @@ function InfoBadge({ label, title }: { label: string; title: string }) {
   );
 }
 
+/** A small pill for a single fact (population, household count, live temp,
+ * estimated demand range) — used in place of a "·"-joined prose sentence so
+ * each fact reads as its own discrete component rather than a run-on line. */
+function StatPill({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        padding: "2px 8px",
+        borderRadius: 999,
+        background: "var(--surface-raised)",
+        color: "var(--ink-soft)",
+        fontSize: "0.72rem",
+        fontWeight: 600,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
 /** Trucks "have" vs. trucks "still need", as a row of truck pictograms
  * instead of a sentence of numbers — a solid truck per truck actually on the
  * roster, then a dashed/outlined "ghost" truck per truck short of what's
  * needed, so the shortfall is visible at a glance instead of requiring the
  * reader to do (needed - have) themselves. */
-function FleetIconRow({ label, have, needed, color }: { label: string; have: number; needed: number; color: string }) {
+function FleetIconRow({
+  label,
+  have,
+  needed,
+  color,
+  hideLabel = false,
+}: {
+  label: string;
+  have: number;
+  needed: number;
+  color: string;
+  /** Skip rendering the leading text label — used when a parent component
+   * (e.g. FleetTypeKpi's big number) already labels this row, so the type
+   * name isn't printed twice right on top of itself. */
+  hideLabel?: boolean;
+}) {
   const shortfall = Math.max(needed - have, 0);
   const total = have + shortfall;
   const step = 24;
   const width = Math.max(step, total * step);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-      <span style={{ fontSize: "0.78rem", color: "var(--ink-soft)", minWidth: 58 }}>{label}</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
+      {!hideLabel && <span style={{ fontSize: "0.78rem", color: "var(--ink-soft)", minWidth: 58 }}>{label}</span>}
       <svg
         width={width}
         height={22}
@@ -202,6 +241,33 @@ function FleetIconRow({ label, have, needed, color }: { label: string; have: num
       {shortfall > 0 && (
         <span style={{ fontSize: "0.76rem", color: "var(--danger)", fontWeight: 700 }}>+{shortfall} short</span>
       )}
+    </div>
+  );
+}
+
+/** The prominent "trucks needed vs. trucks running" big-number KPI per truck
+ * type, requested in place of surfacing this comparison only via a badge
+ * label + small pictogram + numbers buried in a sentence. The big number and
+ * the pictogram below it are computed from the exact same `have`/`needed`
+ * inputs, so the headline figure and the detailed truck-by-truck breakdown
+ * can never contradict each other. */
+function FleetTypeKpi({ label, have, needed, color }: { label: string; have: number; needed: number; color: string }) {
+  const shortfall = Math.max(needed - have, 0);
+  const ok = shortfall === 0;
+  return (
+    <div style={{ flex: "1 1 0", minWidth: 132 }}>
+      <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+        {label}
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginTop: 1 }}>
+        <span style={{ fontSize: "1.55rem", fontWeight: 800, lineHeight: 1, color: ok ? "var(--green)" : "var(--danger)" }}>
+          {needed}
+        </span>
+        <span style={{ fontSize: "0.72rem", color: "var(--ink-soft)" }}>
+          truck{needed === 1 ? "" : "s"} needed &middot; {have} running
+        </span>
+      </div>
+      <FleetIconRow label={label} have={have} needed={needed} color={color} hideLabel />
     </div>
   );
 }
@@ -460,17 +526,32 @@ export default function CommunitiesPage() {
           {rows.map(({ name, coords, hhHere, worst, counts, tempC, estLow, estHigh }) => (
             <div key={name} className="card" style={{ padding: 12, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-                <strong style={{ fontSize: "1rem" }}>{name}</strong>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                  <strong style={{ fontSize: "1rem" }}>{name}</strong>
+                  {counts.high > 0 && (
+                    <span
+                      style={{ fontSize: "1.2rem", fontWeight: 800, lineHeight: 1, color: "var(--danger)" }}
+                      title={`${counts.high} household(s) need a truck right now`}
+                    >
+                      {counts.high}
+                    </span>
+                  )}
+                </div>
                 <span className={worst === "high" ? "pg-badge-pulse" : undefined}>
                   <Badge label={worst[0].toUpperCase() + worst.slice(1)} variant={worst} title={VARIANT_TOOLTIP[worst]} />
                 </span>
               </div>
-              <p style={{ margin: "4px 0 0 0", color: "var(--ink-soft)", fontSize: "0.78rem", lineHeight: 1.4 }}>
-                Pop. ~{coords.population.toLocaleString()} · {hhHere.length} household(s) ·{" "}
-                {tempC.toFixed(1)}°C
-                <span className="pg-live-dot" title="Live ambient temperature reading" />
-                {" "}· {estLow.toLocaleString()}–{estHigh.toLocaleString()} L/day
-              </p>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                <StatPill>~{coords.population.toLocaleString()} pop.</StatPill>
+                <StatPill>{hhHere.length} household(s)</StatPill>
+                <StatPill>
+                  {tempC.toFixed(1)}°C
+                  <span className="pg-live-dot" title="Live ambient temperature reading" />
+                </StatPill>
+                <StatPill>
+                  {estLow.toLocaleString()}–{estHigh.toLocaleString()} L/day
+                </StatPill>
+              </div>
 
               {/* Full risk distribution across every monitored household — not
                   just the single worst-case badge above, so a community with
@@ -540,10 +621,16 @@ export default function CommunitiesPage() {
             ))}
           </select>
         </label>
-        <span style={{ fontSize: "0.8rem", color: "var(--ink-soft)" }}>
-          {selectedRow.communityNeedsTruck ? "🚨 needs a truck soon" : "no truck needed right now"} · {selectedShown.length}{" "}
-          household(s) in {selectedCommunity}
-        </span>
+        <Badge
+          label={selectedRow.communityNeedsTruck ? "Truck needed soon" : "No truck needed now"}
+          variant={selectedRow.communityNeedsTruck ? "high" : "low"}
+          title={
+            selectedRow.communityNeedsTruck
+              ? "At least one household here is predicted to need a truck within ~1 day, or has a sewage tank at/above 90% full."
+              : "No household in this community currently needs urgent action."
+          }
+        />
+        <InfoBadge label={`${selectedShown.length} household(s)`} title={`Every monitored household in ${selectedCommunity}, shown below.`} />
       </div>
       <div style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}>
         <div
@@ -585,41 +672,25 @@ export default function CommunitiesPage() {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, flexShrink: 0, marginBottom: 8 }}>
         {fleetRows.map((r) => (
           <div key={r.name} className="card" style={{ padding: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <strong style={{ fontSize: "0.95rem" }}>{r.name}</strong>
-                <InfoIcon label="How these numbers are calculated">
-                  Water: {r.waterDemandL.toLocaleString(undefined, { maximumFractionDigits: 0 })} L needed now →{" "}
-                  {r.water.truckloads} load(s) ÷ ~{r.tripsPerTruckPerDay.toFixed(1)} trips/truck/day →{" "}
-                  {r.water.trucksNeeded} truck(s) needed (have {ACTUAL_TRUCKS_PER_TYPE}). Sewage:{" "}
-                  {r.sewageDemandL.toLocaleString(undefined, { maximumFractionDigits: 0 })} L needing pump-out →{" "}
-                  {r.sewage.truckloads} load(s) → {r.sewage.trucksNeeded} truck(s) needed (have {ACTUAL_TRUCKS_PER_TYPE}).
-                </InfoIcon>
-              </div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <Badge
-                  label={r.water.shortfall > 0 ? `Water: short ${r.water.shortfall}` : "Water: OK"}
-                  variant={r.water.shortfall > 0 ? "high" : "low"}
-                  title={
-                    r.water.shortfall > 0
-                      ? `Needs ${r.water.shortfall} more water truck(s) than the ${ACTUAL_TRUCKS_PER_TYPE} on hand to clear today's demand.`
-                      : `The ${ACTUAL_TRUCKS_PER_TYPE} water trucks on hand can cover today's demand.`
-                  }
-                />
-                <Badge
-                  label={r.sewage.shortfall > 0 ? `Sewage: short ${r.sewage.shortfall}` : "Sewage: OK"}
-                  variant={r.sewage.shortfall > 0 ? "high" : "low"}
-                  title={
-                    r.sewage.shortfall > 0
-                      ? `Needs ${r.sewage.shortfall} more sewage truck(s) than the ${ACTUAL_TRUCKS_PER_TYPE} on hand to clear today's demand.`
-                      : `The ${ACTUAL_TRUCKS_PER_TYPE} sewage trucks on hand can cover today's demand.`
-                  }
-                />
-              </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+              <strong style={{ fontSize: "0.95rem" }}>{r.name}</strong>
+              <InfoIcon label={`How ${r.name}'s numbers are calculated`}>
+                {r.waterDemandL.toLocaleString(undefined, { maximumFractionDigits: 0 })} L of water needed right now
+                and {r.sewageDemandL.toLocaleString(undefined, { maximumFractionDigits: 0 })} L of sewage waiting to
+                be pumped, at ~{r.tripsPerTruckPerDay.toFixed(1)} trips/truck/day for this community&rsquo;s travel
+                distances. See &ldquo;How the fleet-capacity numbers are calculated&rdquo; below for the full
+                formula.
+              </InfoIcon>
             </div>
 
-            <FleetIconRow label="Water" have={ACTUAL_TRUCKS_PER_TYPE} needed={r.water.trucksNeeded} color="var(--teal)" />
-            <FleetIconRow label="Sewage" have={ACTUAL_TRUCKS_PER_TYPE} needed={r.sewage.trucksNeeded} color="var(--gold)" />
+            {/* Big-number "trucks needed vs. trucks running" per type — the
+                headline figure, with the badge-equivalent status carried by
+                its own color (red = short, green = OK) so it can't drift
+                from the pictogram/shortfall detail right underneath it. */}
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+              <FleetTypeKpi label="Water" have={ACTUAL_TRUCKS_PER_TYPE} needed={r.water.trucksNeeded} color="var(--teal)" />
+              <FleetTypeKpi label="Sewage" have={ACTUAL_TRUCKS_PER_TYPE} needed={r.sewage.trucksNeeded} color="var(--gold)" />
+            </div>
           </div>
         ))}
       </div>

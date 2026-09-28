@@ -152,6 +152,12 @@ export default function PlantPage() {
     });
   }, [hhHere, coords.lat, coords.lon, fLat, fLon, tempC, now]);
 
+  // The single operational question this tab answers: how many of these
+  // households need attention right now (worst of water/sewage = "high"),
+  // regardless of the current filter — the big-number anchor for this tab,
+  // computed from the same real per-household statuses as the badges below.
+  const highAlertCount = useMemo(() => networkRows.filter((r) => r.worst === "high").length, [networkRows]);
+
   const presentClusters = CLUSTER_LABELS.filter((c) => networkRows.some((r) => r.cluster === c));
   const [clusterFilter, setClusterFilter] = useState("All clusters");
   const [sortChoice, setSortChoice] = useState("Urgency (highest first)");
@@ -449,9 +455,32 @@ export default function PlantPage() {
           </label>
         </div>
 
-        <p style={{ color: "var(--ink-soft)", fontSize: "0.78rem", margin: "0 0 0.4rem" }}>
-          Showing {filteredRows.length} of {networkRows.length} households monitored in {community}.
-        </p>
+        <div style={{ display: "flex", alignItems: "baseline", gap: "0.6rem", margin: "0 0 0.4rem", flexWrap: "wrap" }}>
+          <span
+            style={{
+              fontSize: "1.35rem",
+              fontWeight: 800,
+              color: highAlertCount > 0 ? "var(--danger)" : "var(--green)",
+              lineHeight: 1,
+            }}
+          >
+            {highAlertCount}
+          </span>
+          <span style={{ fontSize: "0.82rem", color: "var(--ink-soft)" }}>household(s) need attention now</span>
+          <span
+            style={{
+              fontSize: "0.72rem",
+              color: "var(--ink-soft)",
+              background: "var(--surface-raised)",
+              border: "1px solid var(--border)",
+              borderRadius: 99,
+              padding: "2px 9px",
+              marginLeft: "auto",
+            }}
+          >
+            {filteredRows.length}/{networkRows.length} shown
+          </span>
+        </div>
 
         {networkRows.length > 0 && <DistanceTrack rows={networkRows} highlighted={filteredRows} />}
       </div>
@@ -464,18 +493,32 @@ export default function PlantPage() {
               <span style={{ color: "var(--ink-soft)", fontSize: "0.78rem" }}>&middot; {rows.length} household(s)</span>
             </div>
             {rows.map((r) => (
-              <div key={r.id} className="card" style={{ marginBottom: "0.5rem", padding: "0.6rem 0.9rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
-                  <div>
-                    <strong>{r.id}</strong>{" "}
-                    <span style={{ color: "var(--ink-soft)", fontSize: "0.82rem" }}>
-                      &middot; {r.size} people &middot; {r.distKm.toFixed(1)} km from facility
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", gap: "0.4rem" }}>
-                    <Badge label={r.water.label} variant={r.water.variant} title={r.water.action} />
-                    <Badge label={r.sewage.label} variant={r.sewage.variant} title={r.sewage.action} />
-                  </div>
+              <div
+                key={r.id}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "0.5rem",
+                  padding: "0.4rem 0.2rem",
+                  borderBottom: "1px solid var(--border)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <span
+                    className="aq-cluster-dot"
+                    title={`Worst status: ${r.worst}`}
+                    style={{ width: 8, height: 8, borderRadius: "50%", background: LEVEL_BAR_COLOR[r.worst] }}
+                  />
+                  <strong style={{ fontSize: "0.88rem" }}>{r.id}</strong>
+                  <span style={{ color: "var(--ink-soft)", fontSize: "0.78rem", whiteSpace: "nowrap" }}>
+                    {r.size}p &middot; {r.distKm.toFixed(1)}km
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: "0.4rem", flexShrink: 0 }}>
+                  <Badge label={r.water.label} variant={r.water.variant} title={r.water.action} />
+                  <Badge label={r.sewage.label} variant={r.sewage.variant} title={r.sewage.action} />
                 </div>
               </div>
             ))}
@@ -522,15 +565,13 @@ export default function PlantPage() {
         >
           <div style={{ minWidth: 0 }}>
             <h1 style={{ fontSize: "1.15rem", margin: 0, lineHeight: 1.25 }}>Treatment facility</h1>
-            <p style={{ margin: "1px 0 0", fontSize: "0.74rem", color: "var(--ink-soft)" }}>
-              One of the two fixed points with reliable connectivity (the other is houses)
-            </p>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
             <Badge label="Already monitored weekly" variant="low" title="Coliform testing at the plant is already standard practice in comparable northern systems." />
             <InfoIcon label="What this page does and doesn't cover">
-              The gap this system targets is everything <em>after</em> water leaves here (truck → tank → tap), not
-              the plant.
+              This is one of only two fixed points in the system with reliable connectivity (the other is
+              households). The gap this system targets is everything <em>after</em> water leaves here
+              (truck → tank → tap), not the plant.
             </InfoIcon>
             <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ fontSize: "0.78rem", fontWeight: 600 }}>Facility serving</span>

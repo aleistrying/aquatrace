@@ -52,6 +52,85 @@ const MANUAL_TOOLTIP: Record<string, string> = {
   "Something's wrong": "Resident pressed the backup button to flag a possible problem — needs follow-up.",
 };
 
+const VARIANT_COLOR: Record<Variant, string> = { low: "var(--green)", medium: "var(--gold)", high: "var(--danger)" };
+const VARIANT_TINT: Record<Variant, string> = { low: "var(--green-tint)", medium: "var(--gold-tint)", high: "var(--danger-tint)" };
+
+/**
+ * Small icon+color affordance so status reads at a glance without parsing
+ * text (check = OK, dot = watch, x = urgent) — same three-variant model as
+ * Badge, just a faster-reading glyph instead of / alongside a text pill.
+ */
+function StatusIcon({ variant, size = 18 }: { variant: Variant; size?: number }) {
+  const color = VARIANT_COLOR[variant];
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="11" fill={color} opacity={0.16} />
+      {variant === "low" && (
+        <path d="M7 12.5l3 3 7-7" stroke={color} strokeWidth={2.3} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      )}
+      {variant === "medium" && (
+        <path d="M12 7v6.2M12 16.6v.01" stroke={color} strokeWidth={2.3} strokeLinecap="round" fill="none" />
+      )}
+      {variant === "high" && (
+        <path d="M8 8l8 8M16 8l-8 8" stroke={color} strokeWidth={2.3} strokeLinecap="round" fill="none" />
+      )}
+    </svg>
+  );
+}
+
+/**
+ * The single big, bold visual anchor for "is this household's water OK, and
+ * for how long" — the one operational question this page exists to answer.
+ * Everything it shows (label + forecast text) is already computed upstream
+ * from the real model.ts/tankForecast.ts formulas; this just gives that
+ * existing answer top billing instead of letting it compete with the small
+ * badges/tank captions around it.
+ */
+function HeroStatus({
+  eyebrow,
+  label,
+  detail,
+  variant,
+  title,
+}: {
+  eyebrow: string;
+  label: string;
+  detail?: string;
+  variant: Variant;
+  title?: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "0.7rem",
+        padding: "0.55rem 0.85rem",
+        borderRadius: 12,
+        background: VARIANT_TINT[variant],
+        border: `1px solid ${VARIANT_COLOR[variant]}`,
+        marginBottom: "0.6rem",
+      }}
+      title={title}
+    >
+      <StatusIcon variant={variant} size={30} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 0, minWidth: 100 }}>
+        <span style={{ fontSize: "0.64rem", fontWeight: 700, color: "var(--ink-soft)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+          {eyebrow}
+        </span>
+        <span style={{ fontSize: "1.3rem", fontWeight: 800, color: VARIANT_COLOR[variant], lineHeight: 1.15 }}>{label}</span>
+      </div>
+      {detail && (
+        <div style={{ marginLeft: "auto", textAlign: "right" }}>
+          <span style={{ fontSize: "1rem", fontWeight: 700, fontFamily: "var(--font-mono)", color: VARIANT_COLOR[variant] }}>
+            {detail}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function waterQtyPct(h: Household, now: number): number {
   return 100 * (1 - currentUsedL(h, now) / h.tankCapacityL);
 }
@@ -240,40 +319,42 @@ export default function HousesPage() {
     <div style={{ height: "100%", minHeight: 0, overflowY: "auto" }}>
       <div className="card">
         <div style={{ fontWeight: 700, marginBottom: "0.75rem" }}>Sensor list used at the household stage</div>
-        <div style={{ overflowX: "auto" }}>
-          <SensorTable
-            rows={[
-              [
-                "Water tank level",
-                "Ultrasonic (non-contact) — same category piloted by Université Laval / Sentinel Nord in Kuujjuaq",
-                "No (local readout); relay for remote view",
-                "No wetted parts, freeze-tolerant",
-                "Tank is indoors — sensor sees heated indoor air, not -49°C outside; no hardening needed",
-              ],
-              [
-                "Water tank quality",
-                "Turbidity (optical/IR) + amperometric chlorine residual probe",
-                "No (local readout); relay for remote view",
-                "Amperometric preferred — no reagents to freeze or expire",
-                "Probe is submerged in tank water (stays above freezing indoors) — cold-safe by placement, not spec",
-              ],
-              [
-                "Sewage tank level",
-                "Float switch (mechanical/magnetic reed)",
-                "No (local readout); relay for remote view",
-                "More failure-tolerant than ultrasonic in a corrosive-gas tank (no false readings from foam/condensation)",
-                "Tank is outdoors — mount float low to stay liquid-buffered, heat-trace/insulate the cable run and junction; add a mechanical sight-gauge as no-electronics backup",
-              ],
-              [
-                "Backup button",
-                "Wired doorbell-style button, house power",
-                "Uses house's existing connectivity",
-                "No battery to fail, near-zero maintenance",
-                "Entirely indoors on house power — never touches outside ambient at all",
-              ],
+        <SensorTable
+          rows={[
+              {
+                measurement: "Water tank level",
+                sensorType: "Ultrasonic (non-contact) — same category piloted by Université Laval / Sentinel Nord in Kuujjuaq",
+                needsConnectivity: false,
+                connectivityNote: "Local readout only; a relay adds remote view.",
+                maintenanceNote: "No wetted parts, freeze-tolerant.",
+                coldNote: "Tank is indoors — sensor sees heated indoor air, not -49°C outside; no hardening needed.",
+              },
+              {
+                measurement: "Water tank quality",
+                sensorType: "Turbidity (optical/IR) + amperometric chlorine residual probe",
+                needsConnectivity: false,
+                connectivityNote: "Local readout only; a relay adds remote view.",
+                maintenanceNote: "Amperometric preferred — no reagents to freeze or expire.",
+                coldNote: "Probe is submerged in tank water (stays above freezing indoors) — cold-safe by placement, not spec.",
+              },
+              {
+                measurement: "Sewage tank level",
+                sensorType: "Float switch (mechanical/magnetic reed)",
+                needsConnectivity: false,
+                connectivityNote: "Local readout only; a relay adds remote view.",
+                maintenanceNote: "More failure-tolerant than ultrasonic in a corrosive-gas tank (no false readings from foam/condensation).",
+                coldNote: "Tank is outdoors — mount float low to stay liquid-buffered, heat-trace/insulate the cable run and junction; add a mechanical sight-gauge as no-electronics backup.",
+              },
+              {
+                measurement: "Backup button",
+                sensorType: "Wired doorbell-style button, house power",
+                needsConnectivity: true,
+                connectivityNote: "Uses the house's existing connectivity.",
+                maintenanceNote: "No battery to fail, near-zero maintenance.",
+                coldNote: "Entirely indoors on house power — never touches outside ambient at all.",
+              },
             ]}
-          />
-        </div>
+        />
       </div>
     </div>
   );
@@ -333,8 +414,56 @@ function bigButtonStyle(bg: string, fg: string): CSSProperties {
   };
 }
 
-function SensorTable({ rows }: { rows: string[][] }) {
-  const headers = ["Measurement", "Sensor type", "Needs connectivity?", "Maintenance note", "Cold-weather note"];
+interface SensorRow {
+  measurement: string;
+  sensorType: string;
+  needsConnectivity: boolean;
+  connectivityNote: string;
+  maintenanceNote: string;
+  coldNote: string;
+}
+
+/**
+ * Connectivity is a plain yes/no — an icon reads faster than repeating
+ * "No (local readout)"/"Uses house's existing connectivity" in every row
+ * (rule: icons over text where an icon reads faster). The explanatory
+ * clause moves behind a hover/tap InfoIcon rather than sitting in the cell
+ * as an always-visible sentence.
+ */
+function ConnectivityCell({ needsConnectivity, note }: { needsConnectivity: boolean; note: string }) {
+  const color = needsConnectivity ? "var(--teal)" : "var(--ink-soft)";
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <svg width={15} height={15} viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0 }}>
+        {needsConnectivity ? (
+          <path d="M6 12.5l4 4 8-9" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        ) : (
+          <path d="M6 12h12" stroke={color} strokeWidth={2.4} strokeLinecap="round" fill="none" />
+        )}
+      </svg>
+      <span style={{ color, fontWeight: 600 }}>{needsConnectivity ? "Yes" : "No"}</span>
+      <InfoIcon label="Connectivity note">{note}</InfoIcon>
+    </span>
+  );
+}
+
+/**
+ * Sensor reference table: each row used to carry two full sentences of
+ * always-visible "why" prose (maintenance rationale, cold-weather
+ * rationale). That background explanation now lives behind one InfoIcon per
+ * row instead of two wide text columns — nothing removed, just no longer
+ * competing for attention with the identifying facts (measurement/sensor
+ * type/connectivity) that a viewer actually scans this table for.
+ */
+function SensorTable({ rows }: { rows: SensorRow[] }) {
+  // Column order deliberately keeps both InfoIcon triggers (Connectivity,
+  // Notes) away from the table's right edge, with the free-text "Sensor
+  // type" description — which has no popover to clip — last. InfoIcon's
+  // popover always opens to the right of its trigger, so a trigger sitting
+  // flush against the right edge of a full-width table would push its
+  // popover off-screen; this ordering keeps every popover on-screen at
+  // 1366px without needing to touch the shared InfoIcon component.
+  const headers = ["Measurement", "Needs connectivity?", "Notes", "Sensor type"];
   return (
     <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.82rem" }}>
       <thead>
@@ -347,13 +476,25 @@ function SensorTable({ rows }: { rows: string[][] }) {
         </tr>
       </thead>
       <tbody>
-        {rows.map((row, i) => (
-          <tr key={i}>
-            {row.map((cell, j) => (
-              <td key={j} style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)", color: "var(--ink-soft)", verticalAlign: "top" }}>
-                {cell}
-              </td>
-            ))}
+        {rows.map((row) => (
+          <tr key={row.measurement}>
+            <td style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)", color: "var(--ink)", fontWeight: 600, verticalAlign: "top", whiteSpace: "nowrap" }}>
+              {row.measurement}
+            </td>
+            <td style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)", verticalAlign: "top", whiteSpace: "nowrap" }}>
+              <ConnectivityCell needsConnectivity={row.needsConnectivity} note={row.connectivityNote} />
+            </td>
+            <td style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)", verticalAlign: "top", whiteSpace: "nowrap" }}>
+              <InfoIcon label={`Maintenance and cold-weather notes for ${row.measurement}`}>
+                <strong>Maintenance:</strong> {row.maintenanceNote}
+                <br />
+                <br />
+                <strong>Cold weather:</strong> {row.coldNote}
+              </InfoIcon>
+            </td>
+            <td style={{ padding: "6px 10px", borderBottom: "1px solid var(--border)", color: "var(--ink-soft)", verticalAlign: "top", width: "100%" }}>
+              {row.sensorType}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -394,15 +535,27 @@ function AutoSensorCard({ h, tempC, now }: { h: Household; tempC: number; now: n
 
   return (
     <div className="card">
-      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: "0.4rem 0.6rem", marginBottom: "0.4rem" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: "0.4rem 0.6rem", marginBottom: "0.5rem" }}>
         <div style={{ flex: "1 1 auto", minWidth: 160 }}>
           <strong style={{ fontSize: "1.05rem" }}>{h.id}</strong> ({h.householdSize} people, {h.tankCapacityL}L tank)
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
-          <Badge label={waterBadge.label} variant={waterBadge.variant} title={waterBadgeTitle} />
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "0.4rem" }}>
+          <StatusIcon variant={sewDisp.variant} size={16} />
           <Badge label={sewDisp.label} variant={sewDisp.variant} title={sew.action} />
         </div>
       </div>
+
+      {/* Big-number anchor: the worse of quality/quantity, with the matching
+          real days-remaining forecast — the one number this card exists to
+          answer. The small per-tank badge/caption below stays as backup detail. */}
+      <HeroStatus
+        eyebrow="Water status"
+        label={waterBadge.label}
+        detail={showQtyAsHeadline ? waterFc.text : potFc.text}
+        variant={waterBadge.variant}
+        title={waterBadgeTitle}
+      />
+
       <div style={{ display: "flex", gap: "1.2rem", justifyContent: "center", flexWrap: "wrap" }}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
           <TankSvg pctFull={waterRemainingPct} variant={qtyDisp.variant} label="Water" width={100} height={150} />
@@ -453,24 +606,32 @@ function ManualCard({ h, now }: { h: Household; now: number }) {
   const sew = sewageStatus(sewagePct);
   const sewageFc = sewageForecast(h, now);
   const sewDisp = displayStatusForForecast("sewage", sew.variant, sew.label, sewageFc.days);
+  const manualVariant: Variant = h.manualAlert ? MANUAL_VARIANT[h.manualAlert] : "medium";
+  const manualLabel = h.manualAlert ?? "No report yet";
+  const manualTitle = h.manualAlert ? MANUAL_TOOLTIP[h.manualAlert] : "Resident hasn't pressed the backup button yet.";
   return (
     <div className="card">
-      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: "0.4rem 0.6rem", marginBottom: "0.4rem" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: "0.4rem 0.6rem", marginBottom: "0.5rem" }}>
         <div style={{ flex: "1 1 auto", minWidth: 160 }}>
           <strong style={{ fontSize: "1.05rem" }}>{h.id}</strong> ({h.householdSize} people, {h.tankCapacityL}L tank)
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+        <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "0.4rem" }}>
           <Badge
             label="No sensor yet"
             variant="medium"
             title="This household has no automatic sensor installed yet — status comes from the resident's own backup button."
           />
-          {h.manualAlert && (
-            <Badge label={h.manualAlert} variant={MANUAL_VARIANT[h.manualAlert]} title={MANUAL_TOOLTIP[h.manualAlert]} />
-          )}
+          <StatusIcon variant={sewDisp.variant} size={16} />
           <Badge label={sewDisp.label} variant={sewDisp.variant} title={sew.action} />
         </div>
       </div>
+
+      {/* Big-number anchor for the manual-report households: there's no
+          formula-driven forecast here (no sensor), so the resident's own
+          last report IS the answer to "is this household's water OK" — give
+          it the same top billing the sensor-backed card gives its forecast. */}
+      <HeroStatus eyebrow="Water status (resident-reported)" label={manualLabel} variant={manualVariant} title={manualTitle} />
+
       <div style={{ display: "flex", gap: "1.2rem", justifyContent: "center" }}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
           <TankSvg pctFull={sewagePct} variant={sewDisp.variant} label="Sewage" width={110} height={160} />
