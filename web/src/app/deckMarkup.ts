@@ -327,7 +327,7 @@ export const DECK_MARKUP = `
                 <text x="153" y="90" text-anchor="middle" class="ch-temp" fill="var(--green)">+15&deg;C</text>
               </svg>
             </div>
-            <p class="ch-desc">Specs rate to −10°C, but that's <em>process fluid</em>, not outside air — wetted sensors sit in an indoor, liquid-buffered tank and never see it. Electronics get a heated enclosure — a standard cold-climate instrumentation practice.</p>
+            <p class="ch-fact">Wetted sensors stay indoors, heated — they never see outside air.<span class="ch-info-wrap"><button type="button" class="ch-info-btn" aria-label="Why this works">i</button><span class="ch-info-pop" role="tooltip">Specs rate to −10°C, but that's <em>process fluid</em>, not outside air — wetted sensors sit in an indoor, liquid-buffered tank and never see it. Electronics get a heated enclosure — a standard cold-climate instrumentation practice.</span></span></p>
           </div>
         </div>
 
@@ -355,7 +355,7 @@ export const DECK_MARKUP = `
                 <text x="153" y="92" text-anchor="middle" class="ch-label" fill="var(--ink-soft)">SIGHT GAUGE</text>
               </svg>
             </div>
-            <p class="ch-desc">The one real cold-exposure gap — its headspace air is truly ambient. Fix: heat-traced cable, an insulated junction box, plus a mechanical sight-gauge as zero-electronics manual backup.</p>
+            <p class="ch-fact">Heat-traced cable, plus a zero-electronics backup gauge.<span class="ch-info-wrap"><button type="button" class="ch-info-btn" aria-label="Why this works">i</button><span class="ch-info-pop" role="tooltip">The one real cold-exposure gap — its headspace air is truly ambient. Fix: heat-traced cable, an insulated junction box, plus a mechanical sight-gauge as zero-electronics manual backup.</span></span></p>
           </div>
         </div>
 
@@ -376,7 +376,7 @@ export const DECK_MARKUP = `
                 <text x="161" y="90" text-anchor="middle" class="ch-label" fill="var(--ink-soft)">QUEUED LOCALLY</text>
               </svg>
             </div>
-            <p class="ch-desc">No signal in transit, so readings queue locally and sync in a batch once a connection exists — walked through step by step next.</p>
+            <p class="ch-fact">Queue locally, sync in a batch once connected.<span class="ch-info-wrap"><button type="button" class="ch-info-btn" aria-label="How this works">i</button><span class="ch-info-pop" role="tooltip">No signal in transit, so readings queue locally and sync in a batch once a connection exists — walked through step by step next.</span></span></p>
           </div>
         </div>
 
@@ -401,7 +401,7 @@ export const DECK_MARKUP = `
                 </g>
               </svg>
             </div>
-            <p class="ch-desc">4-20mA "live zero" wiring tells a broken loop from a real zero — stale data gets flagged, never silently frozen. Manual fallback: the wired backup button, or a radio call-in.</p>
+            <p class="ch-fact">A broken sensor is flagged — never silently frozen.<span class="ch-info-wrap"><button type="button" class="ch-info-btn" aria-label="How this is detected">i</button><span class="ch-info-pop" role="tooltip">4-20mA "live zero" wiring tells a broken loop from a real zero — stale data gets flagged, never silently frozen. Manual fallback: the wired backup button, or a radio call-in.</span></span></p>
           </div>
         </div>
 
@@ -460,15 +460,14 @@ export const DECK_MARKUP = `
               </svg>
             </div>
             <div class="tf-caption">
-              <p class="tf-line tf-line-safe">Ultrasonic sensor reads the tank's <b>headspace air</b>, not the liquid — its exposure doesn't change as the tank drains, only if room heating fails.</p>
-              <p class="tf-line tf-line-risk">Below the <b>min safe fill line</b>: less thermal mass, real risk of a thin ice skin during a heating outage — already discouraged by our tank-empty alert.</p>
+              <p class="tf-line tf-line-safe">Reads <b>headspace air</b>, not the liquid — safe as the tank drains.<span class="ch-info-wrap"><button type="button" class="ch-info-btn" aria-label="Why this stays safe">i</button><span class="ch-info-pop" role="tooltip">Ultrasonic sensor reads the tank's headspace air, not the liquid — its exposure doesn't change as the tank drains, only if room heating fails.</span></span></p>
+              <p class="tf-line tf-line-risk">Real risk only below the <b>min safe fill line</b>, during a heating outage.<span class="ch-info-wrap"><button type="button" class="ch-info-btn" aria-label="Why this is designed for">i</button><span class="ch-info-pop" role="tooltip">Less thermal mass below the min safe fill line means real risk of a thin ice skin during a heating outage — already discouraged by our tank-empty alert. Heat tracing is a real, established freeze-protection standard for cold-climate tanks and water lines, why this failure mode gets designed for, not ignored.</span></span></p>
             </div>
           </div>
           <div class="tf-badge-row">
             <span class="tf-badge tf-badge-safe"><svg viewBox="0 0 24 24"><use href="#icon-house"/></svg> Indoors &middot; stable air</span>
             <span class="tf-badge tf-badge-risk"><svg viewBox="0 0 24 24"><use href="#icon-snowflake"/></svg> Heating-failure ice risk</span>
           </div>
-          <p class="reveal d3" style="font-size:0.74rem;color:var(--ink-soft);margin-top:10px;">Heat tracing is a real, established freeze-protection standard for cold-climate tanks and water lines &mdash; why this failure mode gets designed for, not ignored.</p>
         </div>
       </div>
     </div>

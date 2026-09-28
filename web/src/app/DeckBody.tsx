@@ -142,6 +142,40 @@ export default function DeckBody({ html }: { html: string }) {
       })();
 
       (function () {
+        // Challenges slide "i" buttons: click toggles the adjacent floating
+        // popover open/closed (same idea as the live product pages' InfoIcon
+        // component, reimplemented in plain DOM here since this markup is
+        // static HTML, not React). Only one open at a time; clicking outside
+        // or hitting Escape closes whatever's open.
+        function closeAll() {
+          document.querySelectorAll<HTMLElement>(".ch-info-pop.open").forEach((p) => p.classList.remove("open"));
+          document.querySelectorAll<HTMLElement>(".ch-info-btn.open").forEach((b) => {
+            b.classList.remove("open");
+            b.setAttribute("aria-expanded", "false");
+          });
+        }
+        document.addEventListener("click", function (e) {
+          const target = e.target as HTMLElement;
+          const btn = target.closest<HTMLElement>(".ch-info-btn");
+          if (btn) {
+            const pop = btn.nextElementSibling as HTMLElement | null;
+            const wasOpen = btn.classList.contains("open");
+            closeAll();
+            if (!wasOpen && pop) {
+              pop.classList.add("open");
+              btn.classList.add("open");
+              btn.setAttribute("aria-expanded", "true");
+            }
+            return;
+          }
+          if (!target.closest(".ch-info-pop")) closeAll();
+        });
+        document.addEventListener("keydown", function (e) {
+          if (e.key === "Escape") closeAll();
+        });
+      })();
+
+      (function () {
         // Household Reading slide: each tank's fill rect animates continuously
         // via its own SVG <animate> loop (declarative, always running, same
         // idiom as the "Can The Sensor Freeze" slide's tank). This block only
