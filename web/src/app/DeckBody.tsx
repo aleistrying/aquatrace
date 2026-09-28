@@ -377,33 +377,70 @@ export default function DeckBody({ html }: { html: string }) {
       })();
 
       (function () {
-        // Finale -> live product hand-off: play a brief full-screen "opening"
-        // transition before navigating, instead of an instant page swap.
-        // Scoped to this one CTA only (by id, not by href/class) so every
-        // other link in the deck - including the other /houses links, the
-        // ghost "Full project brief" link, and all arrow-key/dot navigation -
-        // is completely unaffected.
+        // Finale -> live product hand-off: reaching the last slide already
+        // means "done with the deck," so this now opens the product on its
+        // own a couple seconds after arriving - the same full-screen
+        // "opening" transition as before, just auto-triggered instead of
+        // gated behind a click. The button stays as a "skip the wait"
+        // shortcut, and the auto-timer is cancelled if the viewer navigates
+        // away before it fires (e.g. arrow-keys back to an earlier slide).
         const launchLink = document.getElementById("deckLaunchBtn") as HTMLAnchorElement | null;
         const overlay = document.getElementById("launchTransition");
-        if (!launchLink || !overlay) return;
+        const finaleSlide = launchLink?.closest(".slide") as HTMLElement | null;
+        if (!launchLink || !overlay || !finaleSlide) return;
         const TRANSITION_MS = 400;
+        const AUTO_LAUNCH_DELAY_MS = 2200;
         let navigating = false;
-        launchLink.addEventListener("click", function (e) {
-          e.preventDefault();
+        let autoTimer: ReturnType<typeof setTimeout> | null = null;
+
+        function launch(x: number, y: number) {
           if (navigating) return;
           navigating = true;
-          const href = launchLink.getAttribute("href") || "/houses";
+          if (autoTimer) {
+            clearTimeout(autoTimer);
+            autoTimer = null;
+          }
+          const href = launchLink!.getAttribute("href") || "/houses";
+          overlay!.style.setProperty("--fj-launch-x", `${x}px`);
+          overlay!.style.setProperty("--fj-launch-y", `${y}px`);
+          overlay!.classList.add("active");
+          setTimeout(function () {
+            window.location.href = href;
+          }, TRANSITION_MS);
+        }
+
+        function launchFromCenter() {
+          const rect = launchLink!.getBoundingClientRect();
+          launch(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        }
+
+        function armAutoLaunch() {
+          if (autoTimer || navigating) return;
+          autoTimer = setTimeout(function () {
+            autoTimer = null;
+            launchFromCenter();
+          }, AUTO_LAUNCH_DELAY_MS);
+        }
+
+        launchLink.addEventListener("click", function (e) {
+          e.preventDefault();
           const rect = launchLink.getBoundingClientRect();
           const hasClientCoords = e.clientX !== 0 || e.clientY !== 0;
           const x = hasClientCoords ? e.clientX : rect.left + rect.width / 2;
           const y = hasClientCoords ? e.clientY : rect.top + rect.height / 2;
-          overlay.style.setProperty("--fj-launch-x", `${x}px`);
-          overlay.style.setProperty("--fj-launch-y", `${y}px`);
-          overlay.classList.add("active");
-          setTimeout(function () {
-            window.location.href = href;
-          }, TRANSITION_MS);
+          launch(x, y);
         });
+
+        new MutationObserver(function () {
+          if (finaleSlide.classList.contains("active")) {
+            armAutoLaunch();
+          } else if (autoTimer) {
+            clearTimeout(autoTimer);
+            autoTimer = null;
+          }
+        }).observe(finaleSlide, { attributes: true, attributeFilter: ["class"] });
+
+        if (finaleSlide.classList.contains("active")) armAutoLaunch();
       })();
     }
   }, [html]);
