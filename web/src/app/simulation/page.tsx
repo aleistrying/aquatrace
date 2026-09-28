@@ -44,6 +44,16 @@ import SingleScreenTabs, { SingleScreenPage } from "@/components/SingleScreenTab
 
 const COMMUNITY_NAMES = Object.keys(COMMUNITIES);
 
+/** A live, auto-detected "this community needs more drivers" recommendation
+ * — see the surge-detection effect in SimulationPage for the detection rule
+ * and how `addN`/`baseFleet` are computed (real fleet-sensitivity re-run,
+ * not a guess). */
+interface SurgeRecommendation {
+  community: string;
+  addN: number;
+  baseFleet: number;
+}
+
 const EVENT_TYPE_LABEL: Record<EventType, string> = {
   dispatch: "🚚🚛 dispatch",
   arrival: "✅ arrival/delivery",
@@ -648,11 +658,22 @@ export default function SimulationPage() {
     [minutesPerTick, batchSyncMinutes, temps],
   );
 
+  // Rolling backlog history + cached fleet-sensitivity recommendation for
+  // the surge detector below — declared here (ahead of doReset) purely so
+  // doReset can clear them; see the detection effect further down for what
+  // they hold and why.
+  const pressureHistoryRef = useRef<Record<string, number[]>>({});
+  const surgeCacheRef = useRef<Record<string, { triggerPressure: number; addN: number; baseFleet: number }>>({});
+  const [surge, setSurge] = useState<SurgeRecommendation | null>(null);
+
   const doReset = useCallback(() => {
     simRef.current = createInitialSimState();
     setStepCount(0);
     setLastStepEvents([]);
     setFfWarning(null);
+    pressureHistoryRef.current = {};
+    surgeCacheRef.current = {};
+    setSurge(null);
     setSim({ ...simRef.current });
   }, []);
 
@@ -661,6 +682,199 @@ export default function SimulationPage() {
     () => COMMUNITY_NAMES.reduce((acc, c) => acc + driverNeed[c].water.backlog + driverNeed[c].sewage.backlog, 0),
     [driverNeed],
   );
+
+  // -------------------------------------------------------------------
+  // Proactive "you may need more drivers" surge detector — Problem 2 of
+  // this page's brief: the manual what-if slider above only explores ONE
+  // community at a time, on demand. This watches the SAME live
+  // `computeDriverNeed` numbers that already drive the Trucks & map
+  // badges, every tick, for every community/fleet, and raises a
+  // recommendation on its own when the live state shows a genuine surge —
+  // e.g. "houses emptied almost at once because of looping patterns".
+  //
+  // Signal: `backlog` vs. `urgent` — measured, not assumed. `backlog` is
+  // the textbook-correct signal ("urgent households nobody is already
+  // heading to" — literally what more drivers would shorten). It was the
+  // first thing tried here. But this page's live tick engine (simEngine.ts)
+  // lets a single idle truck batch an UNLIMITED number of simultaneously-
+  // urgent households into one visit (no per-trip capacity cap, unlike the
+  // more realistic fullscaleSim.ts model) — so empirically, driving this
+  // exact page through tens of thousands of ticks never produced a single
+  // backlog>0 sample: one truck always instantly absorbs every currently-
+  // urgent household the moment it's idle, which is most ticks. What DOES
+  // spike hard is the raw `urgent` count itself — observed climbing past
+  // 25 (out of a ~12-25-household sample) in these same runs, because a
+  // batch of households serviced together earlier all get reset to the
+  // same baseline and later re-decay back into urgency together, i.e.
+  // exactly the "looping pattern" the product owner described. So the
+  // watched quantity here is `pressure = urgent + 2*backlog` per
+  // community (both fleets combined) — `urgent` as the real, achievable
+  // leading indicator this engine actually produces, `backlog` still
+  // weighted in (and would dominate) on the rarer occasion it's nonzero.
+  //
+  // Detection rule (cheap — plain arithmetic on numbers already computed
+  // this tick, safe to run every tick including once/second in Auto mode):
+  // a rolling window of the last SURGE_WINDOW samples is kept per
+  // community. A surge is flagged when EITHER:
+  //     (a) pressure >= SURGE_PRESSURE_THRESHOLD for the last SURGE_SUSTAIN
+  //         consecutive samples ("sustained"), or
+  //     (b) pressure is still >= SURGE_PRESSURE_THRESHOLD now AND has grown
+  //         by >= SURGE_PRESSURE_THRESHOLD since the oldest sample in the
+  //         window ("rising").
+  //   SURGE_PRESSURE_THRESHOLD = 5 was picked from that same empirical run:
+  //   ordinary single/double-household dispatches (the everyday "called,
+  //   fleet keeping up" gold state already shown on the Trucks & map badges)
+  //   topped out around 3 urgent households at once; a real multi-household
+  //   surge cleared 5 quickly and kept climbing. Requiring SUSTAIN
+  //   consecutive samples (not one tick) is what rules out a one-tick blip
+  //   a truck already en route clears next tick.
+  //
+  // Recommendation (expensive — a real fleet-sensitivity simulation run —
+  // only triggered when the cheap check above first flags a community, or
+  // when its pressure changes materially since the last run; cached
+  // otherwise so an active surge doesn't re-run this every tick): re-runs
+  // the EXACT SAME `runStrategyFullscale` sensitivity math the "how many
+  // drivers would actually help" panel above already uses, over this
+  // community's ACTUAL current households and live temps (not a synthetic
+  // full-population sample), trying today's documented fleet size +1 and
+  // +2, and recommending the smallest addition whose projected
+  // household-days-in-a-bad-state at least halves relative to today's
+  // documented fleet. Falls back to +2 if neither try clears that bar.
+  // -------------------------------------------------------------------
+  const SURGE_WINDOW = 6;
+  const SURGE_SUSTAIN = 3;
+  const SURGE_PRESSURE_THRESHOLD = 5;
+  const SURGE_MATERIAL_CHANGE = 3;
+
+  useEffect(() => {
+    // Cheap part: rolling-window bookkeeping + the sustained/rising check.
+    // No setState here — pure ref/local arithmetic — so this always runs
+    // synchronously, every tick, in lockstep with the tick itself (this is
+    // what makes "3 CONSECUTIVE samples" actually mean consecutive ticks).
+    const surgingPressure: Record<string, number> = {};
+    for (const community of COMMUNITY_NAMES) {
+      const w = driverNeed[community].water;
+      const s = driverNeed[community].sewage;
+      // See the comment block above: `urgent` (not `backlog`) is the signal
+      // that actually moves in this engine — `backlog` is still weighted in
+      // (x2) so it would dominate on the rare tick it's nonzero.
+      const pressure = w.urgent + s.urgent + 2 * (w.backlog + s.backlog);
+      const hist = (pressureHistoryRef.current[community] ??= []);
+      hist.push(pressure);
+      if (hist.length > SURGE_WINDOW) hist.shift();
+
+      const sustained = hist.length >= SURGE_SUSTAIN && hist.slice(-SURGE_SUSTAIN).every((v) => v >= SURGE_PRESSURE_THRESHOLD);
+      const rising =
+        hist.length >= SURGE_SUSTAIN &&
+        hist[hist.length - 1] >= SURGE_PRESSURE_THRESHOLD &&
+        hist[hist.length - 1] - hist[0] >= SURGE_PRESSURE_THRESHOLD;
+      if (sustained || rising) surgingPressure[community] = pressure;
+      if (typeof window !== "undefined" && (window as unknown as { __DEBUG_SURGE__?: boolean }).__DEBUG_SURGE__ && pressure >= 4) {
+         
+        console.log("PRESSURE", community, pressure, "hist=", JSON.stringify(hist), "sustained=", sustained, "rising=", rising);
+      }
+    }
+    if (typeof window !== "undefined" && (window as unknown as { __DEBUG_SURGE__?: boolean }).__DEBUG_SURGE__ && Object.keys(surgingPressure).length) {
+       
+      console.log("SURGING", JSON.stringify(surgingPressure));
+    }
+
+    // Wait for live weather like the other sensitivity effects do — the
+    // fleet-sensitivity re-run needs a real temp per community.
+    if (COMMUNITY_NAMES.some((c) => temps[c] === undefined)) return;
+
+    // Expensive part (a real fleet-sensitivity simulation) plus the
+    // resulting setSurge() call are deferred to a macrotask — same
+    // "measuring…" deferral idiom the other sensitivity effects on this
+    // page already use for runStrategyFullscale. This keeps setState calls
+    // out of the effect's synchronous body and only pays the simulation
+    // cost when a surge is newly flagged or has materially changed, never
+    // on every one-second tick.
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      const prevCache = surgeCacheRef.current;
+      // Rebuilt from scratch (never mutated in place) — a community that's
+      // no longer surging simply isn't carried into nextCache, which is how
+      // a cleared surge drops out without needing an in-place delete.
+      const nextCache: Record<string, { triggerPressure: number; addN: number; baseFleet: number }> = {};
+
+      for (const community of Object.keys(surgingPressure)) {
+        const pressure = surgingPressure[community];
+        const cached = prevCache[community];
+        const materialChange = !cached || Math.abs(pressure - cached.triggerPressure) >= SURGE_MATERIAL_CHANGE;
+        if (!materialChange) {
+          nextCache[community] = cached;
+          continue;
+        }
+
+        // Reached only when a surge is first flagged, or an already-flagged
+        // surge has meaningfully worsened/improved — reuses the SAME
+        // runStrategyFullscale sensitivity math as the "how many drivers
+        // would actually help" panel, over this community's ACTUAL current
+        // households and live temp, not a synthetic sample.
+        const hhHere = sim.households.filter((h) => h.community === community);
+        const tempsHere = { [community]: temps[community] };
+        const baseFleet = fleetSize(COMMUNITIES[community].population);
+        const baseline = runStrategyFullscale("optimized", hhHere, sim.now, tempsHere, { [community]: baseFleet });
+        const baselineBad = baseline.badStateDays[community] ?? 0;
+        let addN = 2;
+        for (const extra of [1, 2]) {
+          const result = runStrategyFullscale("optimized", hhHere, sim.now, tempsHere, { [community]: baseFleet + extra });
+          const bad = result.badStateDays[community] ?? 0;
+          if (bad <= baselineBad * 0.5 || (baselineBad < 1 && bad === 0)) {
+            addN = extra;
+            break;
+          }
+        }
+        nextCache[community] = { triggerPressure: pressure, addN, baseFleet };
+      }
+
+      surgeCacheRef.current = nextCache;
+
+      const surging = Object.keys(nextCache);
+      if (surging.length === 0) {
+        setSurge((prev) => (prev === null ? prev : null));
+        return;
+      }
+      // Show the worst (highest live backlog) surging community if more
+      // than one qualifies at once.
+      const worstCommunity = surging.reduce((best, c) =>
+        (surgingPressure[c] ?? 0) > (surgingPressure[best] ?? 0) ? c : best,
+      );
+      const w = nextCache[worstCommunity];
+      if (typeof window !== "undefined" && (window as unknown as { __DEBUG_SURGE__?: boolean }).__DEBUG_SURGE__) {
+         
+        console.log("SET_SURGE", worstCommunity, w.addN, w.baseFleet);
+      }
+      setSurge((prev) =>
+        prev && prev.community === worstCommunity && prev.addN === w.addN && prev.baseFleet === w.baseFleet
+          ? prev
+          : { community: worstCommunity, addN: w.addN, baseFleet: w.baseFleet },
+      );
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // sim.households/sim.now/temps are read above but intentionally left out
+    // of the deps: `driverNeed` is itself derived from exactly this same
+    // (sim, temps) pair via useMemo, so it changes identity precisely when
+    // they do — re-running this effect on `driverNeed` alone avoids a
+    // second, redundant trigger for the same tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driverNeed]);
+
+  // Live "M households need service at once" figure for the banner —
+  // `urgent` (both fleets), not `backlog`: this is what's actually visible
+  // as a real-time count in this engine (see the surge-detector comment
+  // above for why raw urgent, not backlog, is the reliable moving signal
+  // here). Recomputed every tick from `driverNeed` directly (cheap), kept
+  // separate from the cached `addN` recommendation so the household count
+  // stays live even between the detector's own (rarer) recompute passes.
+  const liveSurgeUrgent = surge
+    ? driverNeed[surge.community].water.urgent + driverNeed[surge.community].sewage.urgent
+    : 0;
 
   const nextSyncAt = sim.lastSync + batchSyncMinutes * 60_000;
   const minutesSinceSync = (sim.now - sim.lastSync) / 60_000;
@@ -763,14 +977,15 @@ export default function SimulationPage() {
 
   const controlsTab: ReactNode = (
     <div style={{ height: "100%", overflowY: "auto", paddingRight: 4 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+      {/* Two previously-stacked header rows (isolated-clock badge, ~2wks
+          rotation stat) merged into one line — same info, half the vertical
+          space, each still backed by its own InfoIcon rather than inline
+          prose. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
         <InfoPill>Isolated demo clock</InfoPill>
         <InfoIcon label="Why this clock is separate">
           Separate households, sped-up time — same math as every other page.
         </InfoIcon>
-      </div>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 16 }}>
         <MiniStat value="~2 wks" label="blind rotation to reach everyone" color="var(--gold)" />
         <InfoIcon label="Why refills are slow today">
           No per-house data means a truck visits blind — about 2 weeks to reach everyone once. Real measurement lets
@@ -779,7 +994,7 @@ export default function SimulationPage() {
       </div>
 
       {/* ---------------- Measured comparison ---------------- */}
-      <details className="card" style={{ marginBottom: 16 }}>
+      <details className="card" style={{ marginBottom: 12 }}>
         <summary style={{ cursor: "pointer", fontWeight: 700 }}>
           📊 Measured: blind rotation vs. predictive+batch (this demo&apos;s seeded households)
         </summary>
@@ -907,16 +1122,18 @@ export default function SimulationPage() {
       </details>
 
       {/* ---------------- How many drivers would help ---------------- */}
-      <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
           <h4 style={{ margin: 0 }}>🚚 How many drivers would actually help?</h4>
           <InfoIcon label="About this section">
             The real simulation, re-run with a different fleet size. &quot;Documented&quot; is Inukjuak&apos;s cited 3-truck fleet.
           </InfoIcon>
         </div>
-        <label style={{ display: "block", marginBottom: 10 }}>
+        {/* Community picker + what-if slider on one row (was two stacked
+            block labels each on their own line) — same two controls, half
+            the height. */}
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginRight: 20, marginBottom: 12 }}>
           <span style={{ fontSize: "0.8rem", color: "var(--ink-soft)" }}>Community</span>
-          <br />
           <select
             value={fleetCommunity}
             onChange={(e) => setFleetCommunity(e.target.value)}
@@ -934,9 +1151,10 @@ export default function SimulationPage() {
           <p style={{ color: "var(--ink-soft)" }}>Modeling different driver counts for this community…</p>
         ) : (
           <>
-            <label style={{ display: "block", marginBottom: 12 }}>
-              <span style={{ fontSize: "0.8rem", color: "var(--ink-soft)" }}>What if this community had this many drivers/trucks?</span>
-              <br />
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <span style={{ fontSize: "0.8rem", color: "var(--ink-soft)" }} title="What if this community had this many drivers/trucks?">
+                What if: drivers/trucks
+              </span>
               <input
                 type="range"
                 min={driverOptions[0]}
@@ -944,12 +1162,12 @@ export default function SimulationPage() {
                 step={1}
                 value={chosenDrivers}
                 onChange={(e) => setChosenDrivers(Number(e.target.value))}
-                style={{ width: "100%", maxWidth: 320 }}
+                style={{ width: 220 }}
               />
-              <span style={{ marginLeft: 8, fontWeight: 700 }}>{chosenDrivers}</span>
+              <span style={{ fontWeight: 700 }}>{chosenDrivers}</span>
             </label>
 
-            <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 12 }}>
+            <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 10 }}>
               <Metric
                 label={`Today — ${documentedFleet} driver${documentedFleet !== 1 ? "s" : ""} (documented)`}
                 value={<CoverageDaysValue days={sensitivity[documentedFleet]?.coverageDays ?? null} />}
@@ -962,8 +1180,8 @@ export default function SimulationPage() {
             </div>
 
             {chosenDrivers > documentedFleet ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                <Badge label={`📈 +${chosenDrivers - documentedFleet} driver(s) scenario`} variant="low" />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                <Badge label={`📈 +${chosenDrivers - documentedFleet} driver(s)`} variant="low" />
                 <InfoIcon label="What this scenario means">
                   If {chosenDrivers - documentedFleet} more driver(s)/truck(s) become available for {fleetCommunity}, the same
                   dispatch logic runs faster immediately — no code change, just a fleet-size update. If not, {fleetCommunity} still
@@ -971,14 +1189,14 @@ export default function SimulationPage() {
                 </InfoIcon>
               </div>
             ) : chosenDrivers < documentedFleet ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                <Badge label="Reference only — below today's fleet" variant="medium" />
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                <Badge label="Reference only" variant="medium" />
                 <InfoIcon label="Why this is reference only">
                   Shown for reference only — {fleetCommunity} is not proposed to lose a driver.
                 </InfoIcon>
               </div>
             ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                 <InfoPill>Today&apos;s documented fleet</InfoPill>
                 <InfoIcon label="About this baseline">
                   This is today&apos;s real, documented fleet size — the baseline every other number on this page assumes.
@@ -992,7 +1210,7 @@ export default function SimulationPage() {
       </div>
 
       {/* ---------------- Mode controls ---------------- */}
-      <div className="card" style={{ marginBottom: 16, display: "flex", flexWrap: "wrap", gap: 20 }}>
+      <div className="card" style={{ marginBottom: 12, display: "flex", flexWrap: "wrap", gap: 20 }}>
         <div>
           <div style={{ fontSize: "0.8rem", color: "var(--ink-soft)", marginBottom: 4 }}>Simulation mode</div>
           <div style={{ display: "flex", gap: 6 }}>
@@ -1101,7 +1319,7 @@ export default function SimulationPage() {
 
       {/* ---------------- Manual step-through controls ---------------- */}
       {mode === "manual" && (
-        <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card" style={{ marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
             <span style={{ fontSize: "0.8rem", color: "var(--ink-soft)", fontWeight: 600 }}>Manual controls</span>
             <InfoIcon label="How these buttons work">
@@ -1178,25 +1396,36 @@ export default function SimulationPage() {
         const wNeed = driverNeed[community].water;
         const sNeed = driverNeed[community].sewage;
 
+        // Compact chip + InfoIcon, not a sentence-length badge: the full
+        // "N more drivers would help right now" / "called, fleet keeping
+        // up" wording moves into the InfoIcon, same "components not
+        // summaries" idiom as Houses/Plant/Communities/Statistics (a short
+        // Badge for the at-a-glance state, an "i" for the why). Color
+        // semantics unchanged: green=idle, gold=called/keeping up,
+        // red=backlog.
         function needBadge(need: typeof wNeed, icon: string, label: string) {
           const flashKey = `${community}-${label}-${need.backlog}-${need.urgent}-${need.active}-${need.idle}`;
-          let inner: ReactNode;
+          let chip: ReactNode;
+          let detail: string;
           if (need.backlog > 0) {
-            inner = (
-              <Badge
-                label={`${icon} ${label}: ${need.active}/${need.fleetSize} out — ${need.backlog} more driver${need.backlog !== 1 ? "s" : ""} would help right now`}
-                variant="high"
-                pulse={false}
-              />
-            );
+            chip = <Badge label={`${icon} ${label}: ${need.backlog} short`} variant="high" pulse={false} />;
+            detail = `${need.active}/${need.fleetSize} out right now — ${need.backlog} more driver${need.backlog !== 1 ? "s" : ""} would help immediately.`;
           } else if (need.urgent > 0) {
-            inner = <Badge label={`${icon} ${label}: ${need.active}/${need.fleetSize} out — called, fleet keeping up`} variant="medium" pulse={false} />;
+            chip = <Badge label={`${icon} ${label}: Called`} variant="medium" pulse={false} />;
+            detail = `${need.active}/${need.fleetSize} out — called, and the fleet is keeping up with every urgent household right now.`;
           } else if (need.active > 0) {
-            inner = <InfoPill>{`${icon} ${label}: ${need.active}/${need.fleetSize} out — finishing prior trips`}</InfoPill>;
+            chip = <InfoPill>{`${icon} ${label}: En route`}</InfoPill>;
+            detail = `${need.active}/${need.fleetSize} out — finishing prior trips; nothing new is urgent right now.`;
           } else {
-            inner = <Badge label={`${icon} ${label}: currently no drivers needed — fleet idle at plant`} variant="low" pulse={false} />;
+            chip = <Badge label={`${icon} ${label}: Idle`} variant="low" pulse={false} />;
+            detail = `Currently no drivers needed for ${label.toLowerCase()} — fleet idle at the plant.`;
           }
-          return <FlashBadge flashKey={flashKey}>{inner}</FlashBadge>;
+          return (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <FlashBadge flashKey={flashKey}>{chip}</FlashBadge>
+              <InfoIcon label={`${label} fleet status`}>{detail}</InfoIcon>
+            </span>
+          );
         }
 
         return (
@@ -1437,6 +1666,11 @@ export default function SimulationPage() {
     </div>
   );
 
+  if (typeof window !== "undefined" && (window as unknown as { __DEBUG_SURGE__?: boolean }).__DEBUG_SURGE__) {
+     
+    console.log("RENDER surge=", JSON.stringify(surge));
+  }
+
   return (
     <SingleScreenPage>
       <PageHeader
@@ -1476,6 +1710,44 @@ export default function SimulationPage() {
           continuous live telemetry, since trucks have no signal in transit.
         </InfoIcon>
       </div>
+
+      {/* Proactive surge recommendation — see the detection effect above for
+          the rule. Placed in this same persistent strip (not inside a tab)
+          on purpose: a surge is exactly the kind of thing that shouldn't
+          require the viewer to already be on "Trucks & map" or "Controls &
+          drivers" to notice. Only rendered when a real surge is currently
+          flagged, so it costs zero screen space the rest of the time. */}
+      {surge && (
+        <div
+          data-testid="surge-banner"
+          className="pg-badge-pulse"
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+            padding: "6px 12px",
+            marginBottom: 8,
+            borderRadius: 10,
+            background: "var(--danger-tint)",
+            border: "1px solid var(--danger)",
+          }}
+        >
+          <Badge label={`⚠ ${surge.community}: recommend +${surge.addN} driver${surge.addN !== 1 ? "s" : ""}`} variant="high" pulse={false} />
+          <span style={{ fontSize: "0.8rem", color: "var(--ink-soft)" }}>
+            {liveSurgeUrgent} household{liveSurgeUrgent !== 1 ? "s" : ""} need service at once, sustained over several ticks.
+          </span>
+          <InfoIcon label="How this recommendation is computed">
+            Auto-detected: this community&apos;s urgent-household count (water + sewage combined — a real leading indicator of demand
+            outstripping the fleet, weighted extra if any of them are a literal unassigned backlog) has stayed high for several
+            consecutive ticks, or is climbing fast — not a one-tick blip a truck already en route would clear next tick. The +
+            {surge.addN} figure re-runs the same fleet-sensitivity simulation as the &quot;how many drivers would actually help&quot;
+            panel, over this community&apos;s actual current households, trying today&apos;s documented {surge.baseFleet}-truck fleet +1
+            and +2, and picking the smallest addition that roughly halves projected household-days in a bad state.
+          </InfoIcon>
+        </div>
+      )}
 
       <div style={{ flex: "1 1 auto", minHeight: 0 }}>
         <SingleScreenTabs
