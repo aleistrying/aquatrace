@@ -44,6 +44,13 @@ export interface SimTruckState {
   batch: string[];
   delayed: boolean;
   delayReason: DelayReason | null;
+  // Set by removeTruckFromFleet() when a "- driver" click can't safely pull
+  // this truck out immediately (it's mid-trip). It keeps running its CURRENT
+  // trip exactly as normal - this flag only (a) excludes it from being
+  // handed a NEW dispatch once idle, and (b) tells runFleet's arrival branch
+  // to splice it out of the fleet once that trip completes, instead of
+  // resetting it to idle. Never true for a truck created via newTruckState().
+  retiring: boolean;
 }
 
 export interface SimEvent {
@@ -121,7 +128,16 @@ export function formatSimDateTime(ms: number): string {
 }
 
 export function newTruckState(): SimTruckState {
-  return { status: "idle", target: null, tripStart: null, tripDuration: null, batch: [], delayed: false, delayReason: null };
+  return {
+    status: "idle",
+    target: null,
+    tripStart: null,
+    tripDuration: null,
+    batch: [],
+    delayed: false,
+    delayReason: null,
+    retiring: false,
+  };
 }
 
 /** Two independent trucks per community per truck TYPE - water delivery and
@@ -131,6 +147,53 @@ export function newFleets(): Record<string, SimTruckState[]> {
   const out: Record<string, SimTruckState[]> = {};
   for (const name of Object.keys(COMMUNITIES)) out[name] = [newTruckState(), newTruckState()];
   return out;
+}
+
+export type RemoveTruckResult = "removed" | "retiring" | "empty";
+
+/** Adds one idle truck to a community's water OR sewage fleet in an
+ * ALREADY-RUNNING SimState (the "+ driver" button on the Simulation page).
+ * No special handling needed on the caller's side beyond re-rendering:
+ * advanceOneTick/runFleet iterate `fleet.length`/`fleet.forEach` generically,
+ * so a truck appended here is picked up by dispatch on the very next tick,
+ * exactly like one that existed since newFleets(). */
+export function addTruckToFleet(state: SimState, community: string, kind: FleetKind): void {
+  const fleet = kind === "water" ? state.waterTrucks[community] : state.sewageTrucks[community];
+  if (!fleet) return;
+  fleet.push(newTruckState());
+}
+
+/** Removes one truck from a community's water OR sewage fleet in an
+ * ALREADY-RUNNING SimState (the "- driver" button). Two cases:
+ *   - If any truck in that fleet is currently idle, it's removed immediately
+ *     ("removed") - nothing in-flight to corrupt.
+ *   - Otherwise every truck is mid-trip. Rather than yanking one out and
+ *     losing/corrupting its in-progress target/batch assignment, this marks
+ *     the most-recently-dispatched truck (latest tripStart) `retiring`
+ *     ("retiring") - it finishes its CURRENT trip exactly as normal (still
+ *     delivers to its target/batch, still emits its arrival event), just
+ *     never gets a new dispatch once idle, and runFleet's post-tick
+ *     retirement pass (see above) drops it from the fleet the instant it
+ *     goes idle. Returns "empty" if the fleet has no trucks left to remove.
+ */
+export function removeTruckFromFleet(state: SimState, community: string, kind: FleetKind): RemoveTruckResult {
+  const fleet = kind === "water" ? state.waterTrucks[community] : state.sewageTrucks[community];
+  if (!fleet || fleet.length === 0) return "empty";
+
+  const idleIdx = fleet.findIndex((t) => t.status === "idle" && !t.retiring);
+  if (idleIdx !== -1) {
+    fleet.splice(idleIdx, 1);
+    return "removed";
+  }
+
+  let latestIdx = -1;
+  for (let i = 0; i < fleet.length; i++) {
+    if (fleet[i].retiring) continue;
+    if (latestIdx === -1 || (fleet[i].tripStart ?? -Infinity) > (fleet[latestIdx].tripStart ?? -Infinity)) latestIdx = i;
+  }
+  if (latestIdx === -1) return "retiring"; // every remaining truck is already scheduled to retire
+  fleet[latestIdx].retiring = true;
+  return "retiring";
 }
 
 /** Worst-of(chlorine quality, tank volume) — the WATER side only, no sewage
@@ -266,7 +329,7 @@ function runFleet(
       }
     }
 
-    if (truck.status === "idle") {
+    if (truck.status === "idle" && !truck.retiring) {
       const alreadyAssigned = new Set<string>();
       for (const t of fleet) {
         if (t.status === "en_route" && t.target) {
@@ -301,6 +364,17 @@ function runFleet(
       }
     }
   }
+
+  // Retirement pass: only NOW, after every truck in this fleet has already
+  // been given its chance to arrive/dispatch this tick, do we actually drop
+  // any truck that (a) was marked `retiring` by removeTruckFromFleet() and
+  // (b) is idle - i.e. it just finished (or already had finished) its last
+  // trip. Running this after the loop, not inside it, means splicing here
+  // can never skip or re-visit another truck mid-iteration.
+  for (let i = fleet.length - 1; i >= 0; i--) {
+    if (fleet[i].retiring && fleet[i].status === "idle") fleet.splice(i, 1);
+  }
+
   return servicedCount;
 }
 

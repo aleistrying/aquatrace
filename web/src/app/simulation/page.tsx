@@ -25,6 +25,8 @@ import {
   newFleets,
   advanceOneTick,
   computeDriverNeed,
+  addTruckToFleet,
+  removeTruckFromFleet,
   formatSimTime,
   formatSimDateTime,
   MAX_STEPS_PER_CLICK,
@@ -152,6 +154,146 @@ function CoverageDaysValue({ days }: { days: number | null }) {
 function FlashBadge({ flashKey, children }: { flashKey: string; children: ReactNode }) {
   const flashing = useFlashOnChange(flashKey);
   return <span className={flashing ? "pg-flash-badge" : undefined}>{children}</span>;
+}
+
+/** Gear glyph for the dev-only pacing-knobs toggle button — same idiom as
+ * the deck's Household Reading slide settings gear and statistics page's
+ * methodology gear, reused here as a real React component since this page
+ * (unlike the deck) is plain React, not hand-rolled DOM/JS. */
+function GearIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82A1.65 1.65 0 0 0 3 13.09H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  );
+}
+
+/** Item C's headline KPI — the single big "needed vs. have" number pair
+ * for the currently-selected community, replacing what would otherwise be
+ * yet another small-caps stat row. Color/icon carry the verdict (rule 4:
+ * icons over text) — the "why" behind the `needed` figure lives in the
+ * caller's own adjacent InfoIcon, not squeezed in here. */
+function DriverNeedKPI({ needed, have }: { needed: number; have: number }) {
+  const short = have < needed;
+  const color = short ? "var(--danger)" : "var(--green)";
+  const bg = short ? "var(--danger-tint)" : "var(--green-tint)";
+  const flashKey = `${needed}-${have}`;
+  const flashing = useFlashOnChange(flashKey);
+  return (
+    <div
+      className={flashing ? "pg-flash-value" : undefined}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 12,
+        padding: "10px 18px",
+        borderRadius: 14,
+        background: bg,
+        border: `1px solid ${color}`,
+      }}
+    >
+      <span style={{ fontSize: "1.7rem" }} aria-hidden="true">
+        {short ? "⚠️" : "✅"}
+      </span>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span
+          data-testid="kpi-drivers-needed"
+          style={{ fontSize: "2.3rem", fontWeight: 800, fontFamily: "var(--font-display)", color, lineHeight: 1 }}
+        >
+          {needed}
+        </span>
+        <span style={{ fontSize: "0.78rem", color: "var(--ink-soft)" }}>needed</span>
+        <span style={{ fontSize: "1.2rem", color: "var(--ink-soft)" }}>/</span>
+        <span
+          data-testid="kpi-drivers-have"
+          style={{ fontSize: "2.3rem", fontWeight: 800, fontFamily: "var(--font-display)", color: "var(--ink)", lineHeight: 1 }}
+        >
+          {have}
+        </span>
+        <span style={{ fontSize: "0.78rem", color: "var(--ink-soft)" }}>have</span>
+      </div>
+    </div>
+  );
+}
+
+/** Item D's "+ / -" pair for one fleet type (water or sewage) of the
+ * currently-selected community — compact icon+count+buttons rather than a
+ * bordered card, matching rule 7 (reduce repetitive chrome: two of these
+ * side by side should read as one small control, not two cards). */
+function FleetAdjustRow({
+  icon,
+  label,
+  color,
+  count,
+  onAdd,
+  onRemove,
+  testId,
+}: {
+  icon: string;
+  label: string;
+  color: string;
+  count: number;
+  onAdd: () => void;
+  onRemove: () => void;
+  testId: string;
+}) {
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <span style={{ fontSize: "0.78rem", color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+        <span aria-hidden="true">{icon}</span> {label}
+      </span>
+      <button
+        type="button"
+        data-testid={`${testId}-minus`}
+        onClick={onRemove}
+        disabled={count === 0}
+        aria-label={`Remove one ${label.toLowerCase()} truck`}
+        style={fleetAdjustButtonStyle(color, count === 0)}
+      >
+        −
+      </button>
+      <strong data-testid={`${testId}-count`} style={{ minWidth: 16, textAlign: "center", fontSize: "0.9rem" }}>
+        {count}
+      </strong>
+      <button
+        type="button"
+        data-testid={`${testId}-plus`}
+        onClick={onAdd}
+        aria-label={`Add one ${label.toLowerCase()} truck`}
+        style={fleetAdjustButtonStyle(color, false)}
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+function fleetAdjustButtonStyle(color: string, disabled: boolean): React.CSSProperties {
+  return {
+    width: 22,
+    height: 22,
+    borderRadius: "50%",
+    border: `1px solid ${disabled ? "var(--border)" : color}`,
+    background: "var(--surface)",
+    color: disabled ? "var(--ink-soft)" : color,
+    fontWeight: 700,
+    lineHeight: 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.5 : 1,
+    padding: 0,
+  };
 }
 
 function ProgressBar({ pct, color, label }: { pct: number; color: string; label: string }) {
@@ -593,6 +735,70 @@ export default function SimulationPage() {
   const [lastStepEvents, setLastStepEvents] = useState<SimEvent[]>([]);
   const [ffWarning, setFfWarning] = useState<EventType | null>(null);
 
+  // Item A: the two pacing knobs (sim minutes/tick, batch sync interval) are
+  // internal dev/testing parameters, not something a demo viewer needs - kept
+  // behind this gear-toggled floating panel (see the ref below for the
+  // outside-click/Escape close handling) rather than inline in the main
+  // mode-controls card. `minutesPerTick`/`batchSyncMinutes` themselves are
+  // unchanged - only WHERE their sliders render moved.
+  const [devPanelOpen, setDevPanelOpen] = useState(false);
+  const devPanelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!devPanelOpen) return;
+    function onDocClick(e: MouseEvent) {
+      if (devPanelRef.current && !devPanelRef.current.contains(e.target as Node)) setDevPanelOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setDevPanelOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [devPanelOpen]);
+
+  // Item B: a dismissible, one-line "start here" hint under the tab bar,
+  // shown once ever (persisted in localStorage - a plain state flag would
+  // reset on every reload, which isn't "shown once" for a real demo viewer
+  // reopening the tab). Starts false on both server and client renders (no
+  // localStorage on the server) and is only ever flipped true from an
+  // effect that runs post-mount, so there's no hydration mismatch - just a
+  // hint that may briefly show for returning visitors before this effect
+  // reads localStorage, same tradeoff as any other localStorage-backed UI.
+  const HINT_STORAGE_KEY = "aquatrace-sim-tab-hint-dismissed";
+  const [hintDismissed, setHintDismissed] = useState(false);
+  useEffect(() => {
+    // Deferred to a macrotask - same "keep setState out of the effect's
+    // synchronous body" idiom the surge-detector/comparison effects below
+    // already use - rather than calling setState directly in the effect body.
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      try {
+        if (window.localStorage.getItem(HINT_STORAGE_KEY) === "1") setHintDismissed(true);
+      } catch {
+        // Private-browsing/storage-blocked: fall back to always showing the
+        // hint until dismissed this session - never crash the page over it.
+      }
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, []);
+  const dismissHint = useCallback(() => {
+    setHintDismissed(true);
+    try {
+      window.localStorage.setItem(HINT_STORAGE_KEY, "1");
+    } catch {
+      // Same storage-blocked fallback as above - dismissal just won't
+      // persist across reloads in that case, which is a harmless downgrade.
+    }
+  }, []);
+
   const [temps, setTemps] = useState<Record<string, number>>({});
 
   // Live weather, fetched once per community (Python's fetch_current_temp_c
@@ -674,6 +880,22 @@ export default function SimulationPage() {
     pressureHistoryRef.current = {};
     surgeCacheRef.current = {};
     setSurge(null);
+    setSim({ ...simRef.current });
+  }, []);
+
+  // Item D: the "+ / -" driver buttons mutate the SAME simRef the tick loop
+  // reads/writes every second (not a separate hypothetical calc) via
+  // simEngine.ts's addTruckToFleet/removeTruckFromFleet, then syncs `sim`
+  // exactly like doStep/doFastForward already do - so the very next tick
+  // (Auto mode) or the next Step press picks up the new fleet size
+  // immediately, and every other tab reading `sim.waterTrucks`/`sim.sewageTrucks`
+  // (Trucks & map, the KPI here, computeDriverNeed) reflects it right away.
+  const adjustFleet = useCallback((community: string, kind: FleetKind, delta: 1 | -1) => {
+    if (delta === 1) {
+      addTruckToFleet(simRef.current, community, kind);
+    } else {
+      removeTruckFromFleet(simRef.current, community, kind);
+    }
     setSim({ ...simRef.current });
   }, []);
 
@@ -1147,6 +1369,69 @@ export default function SimulationPage() {
           </select>
         </label>
 
+        {/* ---------------- Item C: big-number "needed vs. have" KPI + item D's
+            live "+ / -" driver controls, both scoped to `fleetCommunity` (the
+            SAME community picker above — no second picker introduced).
+
+            "needed": when this community has an ACTIVE live surge (the same
+            detector driving the banner above the tabs), needed = the fleet
+            size that surge's own fleet-sensitivity re-run recommended
+            (`baseFleet + addN`, both frozen at the instant the surge was
+            flagged/last materially updated - see the surge-cache effect
+            above) - a FIXED target, not `liveHave + addN`. Anchoring to
+            liveHave instead would make "needed" chase "have" upward by
+            addN forever, so clicking + could never close the gap no matter
+            how many trucks got added - the whole point of a target is that
+            "have" can reach and pass it. Otherwise, needed falls back to the
+            documented fleet-sensitivity baseline (`documentedFleet` =
+            fleetSize(population), the exact number the panel below already
+            treats as "today") - the honest steady-state answer to "how many
+            trucks should this community have".
+
+            "have": always the REAL live combined fleet size right now
+            (state.waterTrucks[c].length + state.sewageTrucks[c].length) —
+            not the documented baseline — so clicking + / - below moves this
+            number immediately, including the demo-friendly case of
+            deliberately removing a driver to show `have` drop below
+            `needed`. */}
+        {(() => {
+          const waterCount = sim.waterTrucks[fleetCommunity].length;
+          const sewageCount = sim.sewageTrucks[fleetCommunity].length;
+          const liveHave = waterCount + sewageCount;
+          const surgeActiveHere = surge?.community === fleetCommunity;
+          const neededCount = surgeActiveHere ? surge!.baseFleet + surge!.addN : documentedFleet;
+          return (
+            <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap", marginBottom: 14 }}>
+              <DriverNeedKPI needed={neededCount} have={liveHave} />
+              <InfoIcon label="How &quot;needed&quot; is computed">
+                {surgeActiveHere
+                  ? `A live surge is flagged for ${fleetCommunity} right now — "needed" (${neededCount}) is the fleet size (${surge!.baseFleet} documented + ${surge!.addN} recommended) that surge's own fleet-sensitivity re-run found would clear it (the same figure behind the banner above). It's a fixed target: add trucks with the buttons below and watch "have" close the gap.`
+                  : `No active surge for ${fleetCommunity} — "needed" falls back to the documented fleet-sensitivity baseline for this community's population (${documentedFleet}), the same number the chart below treats as "today". "Have" is always the real, live fleet size, which the +/- buttons here actually change.`}
+              </InfoIcon>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                <FleetAdjustRow
+                  icon="🚚"
+                  label="Water"
+                  color="var(--teal)"
+                  count={waterCount}
+                  onAdd={() => adjustFleet(fleetCommunity, "water", 1)}
+                  onRemove={() => adjustFleet(fleetCommunity, "water", -1)}
+                  testId="fleet-water"
+                />
+                <FleetAdjustRow
+                  icon="🚛"
+                  label="Sewage"
+                  color="var(--gold)"
+                  count={sewageCount}
+                  onAdd={() => adjustFleet(fleetCommunity, "sewage", 1)}
+                  onRemove={() => adjustFleet(fleetCommunity, "sewage", -1)}
+                  testId="fleet-sewage"
+                />
+              </div>
+            </div>
+          );
+        })()}
+
         {!sensitivity || chosenDrivers === null ? (
           <p style={{ color: "var(--ink-soft)" }}>Modeling different driver counts for this community…</p>
         ) : (
@@ -1259,22 +1544,72 @@ export default function SimulationPage() {
           )}
         </div>
 
-        <label style={{ display: "flex", flexDirection: "column", fontSize: "0.8rem", color: "var(--ink-soft)" }}>
-          Sim minutes / tick: <strong>{minutesPerTick}</strong>
-          <input type="range" min={2} max={90} value={minutesPerTick} onChange={(e) => setMinutesPerTick(Number(e.target.value))} />
-        </label>
-
-        <label style={{ display: "flex", flexDirection: "column", fontSize: "0.8rem", color: "var(--ink-soft)" }}>
-          Batch sync every (sim min): <strong>{batchSyncMinutes}</strong>
-          <input
-            type="range"
-            min={15}
-            max={120}
-            step={15}
-            value={batchSyncMinutes}
-            onChange={(e) => setBatchSyncMinutes(Number(e.target.value))}
-          />
-        </label>
+        {/* Item A: dev-only pacing knobs, hidden behind a gear toggle — see
+            DESIGN_RULES.md rule 6 and the deck's Household Reading slide
+            settings gear for the reference idiom. Mode toggle/Running/Reset/
+            View above and below this are left inline on purpose: they're
+            controls a live demo presenter would actually click. */}
+        <div ref={devPanelRef} style={{ position: "relative" }}>
+          <div style={{ fontSize: "0.8rem", color: "var(--ink-soft)", marginBottom: 4 }}>&nbsp;</div>
+          <button
+            type="button"
+            aria-label="Developer pacing settings"
+            aria-expanded={devPanelOpen}
+            data-testid="dev-panel-toggle"
+            onClick={() => setDevPanelOpen((v) => !v)}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 8,
+              border: "1px solid var(--border)",
+              background: devPanelOpen ? "var(--teal-tint)" : "var(--surface)",
+              color: devPanelOpen ? "var(--teal)" : "var(--ink-soft)",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <GearIcon />
+          </button>
+          {devPanelOpen && (
+            <div
+              data-testid="dev-panel"
+              style={{
+                position: "absolute",
+                bottom: "calc(100% + 8px)",
+                left: 0,
+                zIndex: 50,
+                width: 250,
+                padding: 14,
+                borderRadius: 12,
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                <GearIcon size={13} />
+                <strong style={{ fontSize: "0.8rem" }}>Dev: pacing knobs</strong>
+              </div>
+              <label style={{ display: "flex", flexDirection: "column", fontSize: "0.78rem", color: "var(--ink-soft)", marginBottom: 12 }}>
+                Sim minutes / tick: <strong style={{ color: "var(--ink)" }}>{minutesPerTick}</strong>
+                <input type="range" min={2} max={90} value={minutesPerTick} onChange={(e) => setMinutesPerTick(Number(e.target.value))} />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", fontSize: "0.78rem", color: "var(--ink-soft)" }}>
+                Batch sync every (sim min): <strong style={{ color: "var(--ink)" }}>{batchSyncMinutes}</strong>
+                <input
+                  type="range"
+                  min={15}
+                  max={120}
+                  step={15}
+                  value={batchSyncMinutes}
+                  onChange={(e) => setBatchSyncMinutes(Number(e.target.value))}
+                />
+              </label>
+            </div>
+          )}
+        </div>
 
         <div>
           <div style={{ fontSize: "0.8rem", color: "var(--ink-soft)", marginBottom: 4 }}>View</div>
@@ -1749,15 +2084,65 @@ export default function SimulationPage() {
         </div>
       )}
 
-      <div style={{ flex: "1 1 auto", minHeight: 0 }}>
-        <SingleScreenTabs
-          tabs={[
-            { id: "controls", label: "Controls & drivers", content: controlsTab },
-            { id: "trucks", label: "Trucks & map", content: trucksTab },
-            { id: "households", label: "Households", content: householdsTab },
-            { id: "events", label: "Event log", content: eventsTab },
-          ]}
-        />
+      <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
+        {/* Item B: dismissible, shown-once "start here" hint pointing at the
+            tab bar immediately below it — can't be placed literally under
+            the tab BUTTONS themselves without editing SingleScreenTabs
+            (out of scope for this page's file ownership), so it sits right
+            above the tab bar it's introducing instead. Persisted via
+            localStorage (see the effect near the top) so a returning
+            presenter isn't nagged every reload. */}
+        {!hintDismissed && (
+          <div
+            data-testid="tab-guide-hint"
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "6px 12px",
+              marginBottom: 8,
+              borderRadius: 10,
+              background: "var(--teal-tint)",
+              border: "1px solid var(--teal)",
+              fontSize: "0.8rem",
+              color: "var(--teal)",
+            }}
+          >
+            <span aria-hidden="true">👇</span>
+            <span style={{ flex: "1 1 auto" }}>
+              Start here: <strong>Controls &amp; drivers</strong>, then <strong>Trucks &amp; map</strong> to see the fleet respond →
+            </span>
+            <button
+              type="button"
+              onClick={dismissHint}
+              aria-label="Dismiss this hint"
+              data-testid="tab-guide-hint-dismiss"
+              style={{
+                border: "none",
+                background: "transparent",
+                color: "var(--teal)",
+                fontWeight: 700,
+                cursor: "pointer",
+                fontSize: "0.9rem",
+                padding: "2px 6px",
+                flexShrink: 0,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+        <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+          <SingleScreenTabs
+            tabs={[
+              { id: "controls", label: "Controls & drivers", content: controlsTab },
+              { id: "trucks", label: "Trucks & map", content: trucksTab },
+              { id: "households", label: "Households", content: householdsTab },
+              { id: "events", label: "Event log", content: eventsTab },
+            ]}
+          />
+        </div>
       </div>
     </SingleScreenPage>
   );
