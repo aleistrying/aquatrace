@@ -50,8 +50,16 @@ const EVENT_TYPE_LABEL: Record<EventType, string> = {
   sync: "📡 batch sync",
 };
 
+// Fixed seed instant for this "isolated demo clock" (see the page's own
+// InfoIcon on that label) - using the live Date.now() here made the initial
+// household seed (and every value derived from it) differ between the
+// server-rendered HTML and the client's first render, since the two happen
+// at different real-world instants. Same fix idiom as householdStore.ts's
+// SEED_BASELINE_MS.
+const SIM_BASELINE_MS = Date.parse("2026-09-26T00:00:00Z");
+
 function createInitialSimState(): SimState {
-  const now = Date.now();
+  const now = SIM_BASELINE_MS;
   return {
     now,
     households: seedHouseholds(now),
