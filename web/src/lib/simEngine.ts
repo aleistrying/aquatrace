@@ -94,22 +94,29 @@ export const MAX_STEPS_PER_CLICK = 500;
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+// UTC accessors, not local-timezone ones: this renders in a server-rendered
+// client component, so the SSR pass (Vercel's server, some fixed timezone)
+// and the client's hydration pass (the visitor's browser, any timezone)
+// must format the same instant identically - getHours()/getFullYear() etc.
+// depend on the runtime's local timezone and silently differ between the
+// two, causing a React hydration text-mismatch that only surfaces in a real
+// deployment (server and a local dev machine often share one timezone).
 export function formatSimTime(ms: number): string {
   const d = new Date(ms);
-  const mon = MONTHS[d.getMonth()];
-  const day = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
+  const mon = MONTHS[d.getUTCMonth()];
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
   return `${mon} ${day} ${hh}:${mm}`;
 }
 
 export function formatSimDateTime(ms: number): string {
   const d = new Date(ms);
-  const y = d.getFullYear();
-  const mo = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
+  const y = d.getUTCFullYear();
+  const mo = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const hh = String(d.getUTCHours()).padStart(2, "0");
+  const mm = String(d.getUTCMinutes()).padStart(2, "0");
   return `${y}-${mo}-${day} ${hh}:${mm}`;
 }
 
