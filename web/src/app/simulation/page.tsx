@@ -40,6 +40,7 @@ import {
 } from "@/lib/fullscaleSim";
 import { useCountUp, useFlashOnChange } from "@/lib/useMotion";
 import InfoIcon from "@/components/InfoIcon";
+import SingleScreenTabs, { SingleScreenPage } from "@/components/SingleScreenTabs";
 
 const COMMUNITY_NAMES = Object.keys(COMMUNITIES);
 
@@ -743,13 +744,25 @@ export default function SimulationPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fleetCommunity, temps[fleetCommunity]]);
 
-  return (
-    <main style={{ padding: "20px", maxWidth: 1100, margin: "0 auto" }}>
-      <PageHeader
-        title="Simulation"
-        subtitle="Fast-forward demo — 2 water-delivery trucks + 2 sewage-pump trucks per community, watch the algorithm work over simulated time"
-      />
+  // Households tab's own community filter — a per-tab selector (same idiom
+  // as the Houses page) so the ~90-tile household grid fits one screen
+  // without page-level scroll instead of always rendering all 4 communities
+  // at once. "All" still renders everything (inside that tab's own internal
+  // scroll region) — nothing is hidden, just scoped on request.
+  const [householdFilterCommunity, setHouseholdFilterCommunity] = useState<string>("All");
 
+  // -------------------------------------------------------------------
+  // Tab content — the page's top-level state/effects above are untouched
+  // by this split: every hook that must keep ticking (the auto-mode
+  // interval, simRef, stepCount, etc.) lives at component scope, not
+  // inside any of these ReactNode values, so switching which tab is
+  // *rendered* below never unmounts or pauses the simulation. Only the
+  // active tab's JSX actually mounts DOM (SingleScreenTabs renders just
+  // `activeTab.content`) — the others are cheap unmounted element trees.
+  // -------------------------------------------------------------------
+
+  const controlsTab: ReactNode = (
+    <div style={{ height: "100%", overflowY: "auto", paddingRight: 4 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
         <InfoPill>Isolated demo clock</InfoPill>
         <InfoIcon label="Why this clock is separate">
@@ -1086,22 +1099,6 @@ export default function SimulationPage() {
         </div>
       </div>
 
-      <label style={{ display: "block", marginBottom: 16 }}>
-        <span style={{ fontSize: "0.85rem", color: "var(--ink-soft)" }}>Truck map — community</span>
-        <br />
-        <select
-          value={mapCommunity}
-          onChange={(e) => setMapCommunity(e.target.value)}
-          style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
-        >
-          {COMMUNITY_NAMES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-      </label>
-
       {/* ---------------- Manual step-through controls ---------------- */}
       {mode === "manual" && (
         <div className="card" style={{ marginBottom: 16 }}>
@@ -1158,49 +1155,25 @@ export default function SimulationPage() {
           )}
         </div>
       )}
+    </div>
+  );
 
-      {/* ---------------- Live state ---------------- */}
-      <div className="card" style={{ marginBottom: 16, display: "flex", gap: 24, flexWrap: "wrap" }}>
-        <Metric label="Simulated time" value={formatSimDateTime(sim.now)} testId="metric-sim-time" />
-        <Metric label="Households filled/emptied so far" value={sim.totalServiced} />
-        <Metric
-          label="🚚 Extra drivers needed right now"
-          value={<BacklogFlashValue value={totalBacklog} />}
-          help="Households currently urgent (water or sewage) that no truck is already heading to, across all 4 communities — 0 means the current fleet is keeping up with every urgent household this instant."
-        />
-      </div>
-
-      <div className="card" style={{ marginBottom: 16, display: "flex", gap: 24, flexWrap: "wrap", alignItems: "center" }}>
-        <Metric label="📡 Last synced" value={`${minutesSinceSync.toFixed(0)} min ago`} help={`Simulated time of last batch sync: ${formatSimDateTime(sim.lastSync)}`} />
-        <Metric label="Next batch sync in" value={`${minutesUntilSync.toFixed(0)} min`} />
-        <InfoIcon label="How syncing works in real deployment">
-          Real deployment: data batches whenever a connection is available (at the plant, at a house, or via a radio check-in) — not
-          continuous live telemetry, since trucks have no signal in transit.
-        </InfoIcon>
-      </div>
-      {sim.justSynced && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-          <FlashBadge flashKey={`synced-${sim.now}`}>
-            <InfoPill>📡 Synced at {formatSimTime(sim.now)}</InfoPill>
-          </FlashBadge>
-          <InfoIcon label="What just happened">Batch sync completed — household readings below just refreshed.</InfoIcon>
+  const trucksTab: ReactNode = (
+    <div style={{ height: "100%", display: "flex", gap: 16, minHeight: 0 }}>
+      <div style={{ flex: "1 1 60%", minWidth: 0, overflowY: "auto", minHeight: 0, paddingRight: 4 }}>
+        <h4 style={{ margin: "0 0 6px 0" }}>Trucks right now</h4>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 10, fontSize: "0.78rem", color: "var(--ink-soft)" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: "var(--teal)", display: "inline-block" }} />
+            Water-delivery truck
+          </span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: "var(--gold)", display: "inline-block" }} />
+            Sewage-pump truck
+          </span>
+          <InfoIcon label="Fleet size">2 of each per community, grouped below.</InfoIcon>
         </div>
-      )}
-
-      {/* ---------------- Trucks right now ---------------- */}
-      <h4 style={{ margin: "18px 0 6px 0" }}>Trucks right now</h4>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 10, fontSize: "0.78rem", color: "var(--ink-soft)" }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span style={{ width: 10, height: 10, borderRadius: 3, background: "var(--teal)", display: "inline-block" }} />
-          Water-delivery truck
-        </span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span style={{ width: 10, height: 10, borderRadius: 3, background: "var(--gold)", display: "inline-block" }} />
-          Sewage-pump truck
-        </span>
-        <InfoIcon label="Fleet size">2 of each per community, grouped below.</InfoIcon>
-      </div>
-      {COMMUNITY_NAMES.map((community) => {
+        {COMMUNITY_NAMES.map((community) => {
         const hhHere = sim.households.filter((h) => h.community === community);
         const wNeed = driverNeed[community].water;
         const sNeed = driverNeed[community].sewage;
@@ -1286,27 +1259,76 @@ export default function SimulationPage() {
             </div>
           </div>
         );
-      })}
+        })}
+      </div>
 
-      {/* ---------------- Truck map ---------------- */}
-      <h4 style={{ margin: "18px 0 8px 0" }}>Live truck map — {mapCommunity}</h4>
-      <div className="card" style={{ marginBottom: 16 }}>
-        <TruckMap
-          community={mapCommunity}
-          waterTrucks={sim.waterTrucks[mapCommunity]}
-          sewageTrucks={sim.sewageTrucks[mapCommunity]}
-          householdsHere={sim.households.filter((h) => h.community === mapCommunity)}
-          snapshot={sim.syncedSnapshot}
-          now={sim.now}
-        />
+      <div style={{ flex: "1 1 40%", minWidth: 300, overflowY: "auto", minHeight: 0 }}>
+        <label style={{ display: "block", marginBottom: 10 }}>
+          <span style={{ fontSize: "0.85rem", color: "var(--ink-soft)" }}>Truck map — community</span>
+          <br />
+          <select
+            value={mapCommunity}
+            onChange={(e) => setMapCommunity(e.target.value)}
+            style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
+          >
+            {COMMUNITY_NAMES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
+        <h4 style={{ margin: "0 0 8px 0" }}>Live truck map — {mapCommunity}</h4>
+        <div className="card">
+          <TruckMap
+            community={mapCommunity}
+            waterTrucks={sim.waterTrucks[mapCommunity]}
+            sewageTrucks={sim.sewageTrucks[mapCommunity]}
+            householdsHere={sim.households.filter((h) => h.community === mapCommunity)}
+            snapshot={sim.syncedSnapshot}
+            now={sim.now}
+          />
+        </div>
+      </div>
+    </div>
+  );
+
+  const householdsTab: ReactNode = (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 8 }}>
+        <label>
+          <span style={{ fontSize: "0.8rem", color: "var(--ink-soft)" }}>Filter by community</span>
+          <br />
+          <select
+            value={householdFilterCommunity}
+            onChange={(e) => setHouseholdFilterCommunity(e.target.value)}
+            style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
+          >
+            <option value="All">All communities</option>
+            {COMMUNITY_NAMES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
+        {sim.justSynced && (
+          <FlashBadge flashKey={`synced-${sim.now}`}>
+            <InfoPill>📡 Synced at {formatSimTime(sim.now)}</InfoPill>
+          </FlashBadge>
+        )}
+        {sim.justSynced && <InfoIcon label="What just happened">Batch sync completed — household readings below just refreshed.</InfoIcon>}
       </div>
 
       {/* ---------------- Household status / community summary ---------------- */}
       {viewMode === "households" ? (
         <>
-          <h4 style={{ margin: "18px 0 8px 0" }}>Household status</h4>
+          <h4 style={{ margin: "0 0 8px 0", flexShrink: 0 }}>Household status</h4>
+          <div style={{ flex: "1 1 auto", overflowY: "auto", minHeight: 0 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 16 }}>
-            {sim.households.map((h) => {
+            {sim.households
+              .filter((h) => householdFilterCommunity === "All" || h.community === householdFilterCommunity)
+              .map((h) => {
               const snap = sim.syncedSnapshot[h.id];
               const worstVariant = snap?.worstVariant ?? "low";
               const residual = snap?.residual ?? 0;
@@ -1352,12 +1374,14 @@ export default function SimulationPage() {
               );
             })}
           </div>
+          </div>
         </>
       ) : (
         <>
-          <h4 style={{ margin: "18px 0 8px 0" }}>Community summary</h4>
+          <h4 style={{ margin: "0 0 8px 0", flexShrink: 0 }}>Community summary</h4>
+          <div style={{ flex: "1 1 auto", overflowY: "auto", minHeight: 0 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 16 }}>
-            {COMMUNITY_NAMES.map((community) => {
+            {COMMUNITY_NAMES.filter((c) => householdFilterCommunity === "All" || c === householdFilterCommunity).map((community) => {
               const hhHere = sim.households.filter((h) => h.community === community);
               const approachingSewage = hhHere.filter((h) => {
                 const v = sim.syncedSnapshot[h.id]?.sewVariant;
@@ -1387,28 +1411,83 @@ export default function SimulationPage() {
               );
             })}
           </div>
+          </div>
         </>
       )}
+    </div>
+  );
 
-      {/* ---------------- Event log ---------------- */}
-      <details className="card" style={{ marginBottom: 40 }}>
-        <summary style={{ cursor: "pointer", fontWeight: 700 }}>Event log ({sim.events.length})</summary>
-        <div style={{ marginTop: 10, maxHeight: 360, overflowY: "auto" }}>
-          {[...sim.events]
-            .slice(-40)
-            .reverse()
-            .map((event) => (
-              <div
-                key={`${event.atMs}-${event.type}-${event.text}`}
-                className="pg-event-row"
-                style={{ fontSize: "0.8rem", padding: "4px 0", borderBottom: "1px solid var(--border)" }}
-              >
-                {event.text}
-              </div>
-            ))}
-        </div>
-      </details>
-    </main>
+  const eventsTab: ReactNode = (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <h4 style={{ margin: "0 0 8px 0", flexShrink: 0 }}>Event log ({sim.events.length})</h4>
+      <div style={{ flex: "1 1 auto", overflowY: "auto", minHeight: 0 }}>
+        {[...sim.events]
+          .slice(-40)
+          .reverse()
+          .map((event) => (
+            <div
+              key={`${event.atMs}-${event.type}-${event.text}`}
+              className="pg-event-row"
+              style={{ fontSize: "0.8rem", padding: "4px 0", borderBottom: "1px solid var(--border)" }}
+            >
+              {event.text}
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <SingleScreenPage>
+      <PageHeader
+        title="Simulation"
+        subtitle="Fast-forward demo — 2 water-delivery trucks + 2 sewage-pump trucks per community, watch the algorithm work over simulated time"
+      />
+
+      {/* Persistent live-status strip — shown above the tabs regardless of
+          which one is active, so the ticking clock/backlog/sync numbers
+          (the actual proof the simulation keeps running underneath) stay
+          visible no matter what the user is currently looking at. */}
+      <div
+        style={{
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 20,
+          flexWrap: "wrap",
+          padding: "6px 12px",
+          marginBottom: 8,
+          borderRadius: 10,
+          background: "var(--surface-raised)",
+          border: "1px solid var(--border)",
+        }}
+      >
+        <Metric label="Simulated time" value={formatSimDateTime(sim.now)} testId="metric-sim-time" />
+        <Metric label="Households filled/emptied so far" value={sim.totalServiced} />
+        <Metric
+          label="🚚 Extra drivers needed right now"
+          value={<BacklogFlashValue value={totalBacklog} />}
+          help="Households currently urgent (water or sewage) that no truck is already heading to, across all 4 communities — 0 means the current fleet is keeping up with every urgent household this instant."
+        />
+        <Metric label="📡 Last synced" value={`${minutesSinceSync.toFixed(0)} min ago`} help={`Simulated time of last batch sync: ${formatSimDateTime(sim.lastSync)}`} />
+        <Metric label="Next batch sync in" value={`${minutesUntilSync.toFixed(0)} min`} />
+        <InfoIcon label="How syncing works in real deployment">
+          Real deployment: data batches whenever a connection is available (at the plant, at a house, or via a radio check-in) — not
+          continuous live telemetry, since trucks have no signal in transit.
+        </InfoIcon>
+      </div>
+
+      <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+        <SingleScreenTabs
+          tabs={[
+            { id: "controls", label: "Controls & drivers", content: controlsTab },
+            { id: "trucks", label: "Trucks & map", content: trucksTab },
+            { id: "households", label: "Households", content: householdsTab },
+            { id: "events", label: "Event log", content: eventsTab },
+          ]}
+        />
+      </div>
+    </SingleScreenPage>
   );
 }
 

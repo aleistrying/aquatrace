@@ -572,6 +572,13 @@ p.lede{font-size:1.05rem;color:var(--ink-soft);max-width:620px;margin-top:12px;}
 .sn-text b{font-size:0.88rem;display:block;}
 .sn-text span{font-size:0.76rem;color:var(--ink-soft);}
 
+/* Household is the only tier with 4 sensors instead of 2, so its 2-column
+   grid wraps to a second row and pushes this slide past one screen's
+   height - one row of 4 keeps every tier the same height as Plant/Truck. */
+@media (min-width:641px){
+  .sn-tier:last-child .sn-sensor-list{grid-template-columns:repeat(4,1fr);}
+}
+
 @media (max-width:640px){
   .sn-network{gap:8px;margin-top:12px;}
   .sn-tier{padding:10px 12px;}

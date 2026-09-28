@@ -12,6 +12,7 @@ import PageHeader from "@/components/PageHeader";
 import Badge from "@/components/Badge";
 import TruckIcon from "@/components/TruckIcon";
 import InfoIcon from "@/components/InfoIcon";
+import { SingleScreenPage } from "@/components/SingleScreenTabs";
 import { useHouseholds, applyDelivery } from "@/lib/householdStore";
 import { getPlantState } from "@/lib/plantStore";
 import { COMMUNITIES } from "@/lib/model";
@@ -87,217 +88,233 @@ export default function TruckPage() {
   const recent = [...log].slice(-10).reverse();
 
   return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: "20px 16px 60px" }}>
+    <SingleScreenPage>
       <PageHeader title="Truck" subtitle="No cell/internet signal in transit — radio only" />
 
-      <details style={{ marginBottom: "1.25rem" }}>
-        <summary style={{ cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: "0.45rem" }}>
-          <SignalWaveIcon />
-          Why radio, and would GPS trackers even work here?
-        </summary>
-        <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
-            <Badge label="~50 km² coverage area" variant="medium" title="Approximate area a truck must cover between the plant and households within one community." />
-            <Badge label="Signal only at plant + houses" variant="medium" title="The truck itself has no cell/internet signal while in transit — only two-way radio." />
-            <Badge label="40+ yr precedent: APRS" variant="low" title="Automatic Packet Reporting System — GPS-over-radio relay technology in amateur/emergency use since the 1980s." />
-          </div>
-          <GpsVsRadioDiagrams />
-          <ul style={{ margin: 0, paddingLeft: "1.2rem", color: "var(--ink-soft)", fontSize: "0.9rem", lineHeight: 1.6 }}>
-            <li>
-              <strong>GPS itself needs no signal</strong> — it just listens to satellites. Only <em>sending</em>{" "}
-              the position needs a channel, and here that channel is two-way radio, not data.
-            </li>
-            <li>
-              <strong>Built now (3-hr, no new hardware):</strong> driver reads a short status code over the
-              existing voice radio; dispatcher logs it below.
-            </li>
-            <li>
-              <strong>Future phase 2 (not built):</strong> an automatic APRS-style relay — truck GPS keys the
-              same radio automatically. Needs new radio-modem hardware.
-            </li>
-          </ul>
-        </div>
-      </details>
+      {/* Two columns instead of the original stacked layout: the log-entry
+          form (left, fixed width) and the recent check-ins rail (right,
+          fills the remainder) sit side by side so both are visible without
+          any page scroll. Each column scrolls internally (not the page) if
+          its own content — e.g. an expanded "why radio" explainer — would
+          otherwise outgrow the available height. */}
+      <div style={{ display: "flex", gap: "1.1rem", flex: "1 1 auto", minHeight: 0 }}>
+        <div style={{ flex: "0 0 350px", display: "flex", flexDirection: "column", minHeight: 0, overflowY: "auto", paddingRight: 2 }}>
+          <details style={{ marginBottom: "0.85rem", flexShrink: 0 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: "0.45rem" }}>
+              <SignalWaveIcon />
+              Why radio, and would GPS trackers even work here?
+            </summary>
+            <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+                <Badge label="~50 km² coverage area" variant="medium" title="Approximate area a truck must cover between the plant and households within one community." />
+                <Badge label="Signal only at plant + houses" variant="medium" title="The truck itself has no cell/internet signal while in transit — only two-way radio." />
+                <Badge label="40+ yr precedent: APRS" variant="low" title="Automatic Packet Reporting System — GPS-over-radio relay technology in amateur/emergency use since the 1980s." />
+              </div>
+              <GpsVsRadioDiagrams />
+              <ul style={{ margin: 0, paddingLeft: "1.2rem", color: "var(--ink-soft)", fontSize: "0.9rem", lineHeight: 1.6 }}>
+                <li>
+                  <strong>GPS itself needs no signal</strong> — it just listens to satellites. Only <em>sending</em>{" "}
+                  the position needs a channel, and here that channel is two-way radio, not data.
+                </li>
+                <li>
+                  <strong>Built now (3-hr, no new hardware):</strong> driver reads a short status code over the
+                  existing voice radio; dispatcher logs it below.
+                </li>
+                <li>
+                  <strong>Future phase 2 (not built):</strong> an automatic APRS-style relay — truck GPS keys the
+                  same radio automatically. Needs new radio-modem hardware.
+                </li>
+              </ul>
+            </div>
+          </details>
 
-      <h2 style={{ fontSize: "1.3rem", display: "flex", alignItems: "center", gap: 8 }}>
-        Radio check-in log
-        <InfoIcon label="Why dropdowns, not free text">
-          Pre-made dropdowns, not free text — fast for a dispatcher to log while on the radio.
-        </InfoIcon>
-      </h2>
+          <h2 style={{ fontSize: "1.15rem", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            Radio check-in log
+            <InfoIcon label="Why dropdowns, not free text">
+              Pre-made dropdowns, not free text — fast for a dispatcher to log while on the radio.
+            </InfoIcon>
+          </h2>
 
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, maxWidth: 280, margin: "0.75rem 0" }}>
-        <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Community</span>
-        <select
-          value={community}
-          onChange={(e) => {
-            setCommunity(e.target.value);
-            setHouseholdId("—");
-          }}
-          style={selectStyle}
-        >
-          {COMMUNITY_NAMES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <form onSubmit={handleSubmit} className="card" style={{ display: "flex", flexDirection: "column", gap: "0.9rem" }}>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, maxWidth: 280 }}>
-          <span style={{ fontSize: "0.85rem", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
-            Truck
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.72rem", fontWeight: 700, color: FLEET_COLOR[TRUCK_KIND[truckId]] }}>
-              <span
-                style={{ width: 7, height: 7, borderRadius: "50%", background: FLEET_COLOR[TRUCK_KIND[truckId]], display: "inline-block" }}
-              />
-              {TRUCK_KIND[truckId] === "sewage" ? "Sewage-pump fleet" : "Water-delivery fleet"}
-            </span>
-          </span>
-          <select value={truckId} onChange={(e) => setTruckId(e.target.value)} style={selectStyle}>
-            <optgroup label="Water-delivery">
-              {TRUCK_FLEET.filter((t) => t.kind === "water").map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.id}
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, margin: "0.6rem 0", flexShrink: 0 }}>
+            <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Community</span>
+            <select
+              value={community}
+              onChange={(e) => {
+                setCommunity(e.target.value);
+                setHouseholdId("—");
+              }}
+              style={selectStyle}
+            >
+              {COMMUNITY_NAMES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
                 </option>
               ))}
-            </optgroup>
-            <optgroup label="Sewage-pump">
-              {TRUCK_FLEET.filter((t) => t.kind === "sewage").map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.id}
-                </option>
-              ))}
-            </optgroup>
-          </select>
-        </label>
+            </select>
+          </label>
 
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, maxWidth: 280 }}>
-          <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Status code</span>
-          <select value={status} onChange={(e) => setStatus(e.target.value)} style={selectStyle}>
-            {STATUS_CODES.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-        </label>
-
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, maxWidth: 280 }}>
-          <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Household (if Delivered)</span>
-          <select value={householdId} onChange={(e) => setHouseholdId(e.target.value)} style={selectStyle}>
-            <option>—</option>
-            {hhIds.map((id) => (
-              <option key={id}>{id}</option>
-            ))}
-          </select>
-        </label>
-
-        <button
-          type="submit"
-          style={{
-            alignSelf: "flex-start",
-            fontSize: "1rem",
-            fontWeight: 700,
-            padding: "0.7rem 1.3rem",
-            borderRadius: 12,
-            border: "2px solid var(--teal)",
-            background: "var(--teal-tint)",
-            color: "var(--teal)",
-            cursor: "pointer",
-          }}
-        >
-          Log radio check-in
-        </button>
-        {successMsg && <p style={{ color: "var(--green)", fontSize: "0.85rem", fontWeight: 600 }}>{successMsg}</p>}
-      </form>
-
-      <h2 style={{ fontSize: "1.3rem", marginTop: "1.5rem" }}>Recent check-ins</h2>
-      {recent.length === 0 ? (
-        <p style={{ color: "var(--ink-soft)", fontSize: "0.85rem" }}>No check-ins logged yet.</p>
-      ) : (
-        <>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 0.9rem", margin: "0.4rem 0 0.6rem", fontSize: "0.74rem", color: "var(--ink-soft)" }}>
-            {STATUS_CODES.map((s) => (
-              <span key={s} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: STATUS_META[s].color, display: "inline-block" }} />
-                {s}
+          <form onSubmit={handleSubmit} className="card" style={{ display: "flex", flexDirection: "column", gap: "0.75rem", padding: "14px 16px", flexShrink: 0 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: "0.85rem", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                Truck
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.72rem", fontWeight: 700, color: FLEET_COLOR[TRUCK_KIND[truckId]] }}>
+                  <span
+                    style={{ width: 7, height: 7, borderRadius: "50%", background: FLEET_COLOR[TRUCK_KIND[truckId]], display: "inline-block" }}
+                  />
+                  {TRUCK_KIND[truckId] === "sewage" ? "Sewage-pump fleet" : "Water-delivery fleet"}
+                </span>
               </span>
-            ))}
-          </div>
-          <div className="aq-checkin-rail">
-            {recent.map((entry) => {
-              const meta = STATUS_META[entry.status];
-              const kind = TRUCK_KIND[entry.truckId];
-              return (
-                <div key={entry.ts} className="aq-checkin-item">
-                  <div className="aq-checkin-marker" style={{ background: meta.tint }}>
-                    <StatusGlyph status={entry.status} color={meta.color} />
-                  </div>
-                  <div className="card" style={{ flex: 1, minWidth: 0, padding: "0.6rem 0.85rem" }}>
-                    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "0.5rem" }}>
-                      <strong style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem" }}>
-                        {new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}
-                      </strong>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.85rem", fontWeight: 600 }}>
-                        <span style={{ width: 7, height: 7, borderRadius: "50%", background: FLEET_COLOR[kind], display: "inline-block" }} />
-                        {entry.truckId}
-                      </span>
-                      <span style={{ fontWeight: 700, color: meta.color, fontSize: "0.85rem" }}>{entry.status}</span>
-                    </div>
-                    <div style={{ color: "var(--ink-soft)", fontSize: "0.8rem", marginTop: 2 }}>
-                      {entry.community}
-                      {entry.householdId !== "—" && <> &middot; {entry.householdId}</>}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
+              <select value={truckId} onChange={(e) => setTruckId(e.target.value)} style={selectStyle}>
+                <optgroup label="Water-delivery">
+                  {TRUCK_FLEET.filter((t) => t.kind === "water").map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.id}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Sewage-pump">
+                  {TRUCK_FLEET.filter((t) => t.kind === "sewage").map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.id}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+            </label>
 
-      <details style={{ marginTop: "1.5rem" }}>
-        <summary style={{ cursor: "pointer", fontWeight: 600 }}>Sensor list used at this stage</summary>
-        <div style={{ overflowX: "auto", marginTop: "0.75rem" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.82rem" }}>
-            <thead>
-              <tr>
-                {["Measurement", "Sensor type", "Connectivity need", "Maintenance note", "Cold-weather note"].map((hd) => (
-                  <th key={hd} style={{ textAlign: "left", padding: "6px 10px", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap" }}>
-                    {hd}
-                  </th>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Status code</span>
+              <select value={status} onChange={(e) => setStatus(e.target.value)} style={selectStyle}>
+                {STATUS_CODES.map((s) => (
+                  <option key={s}>{s}</option>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td style={tdStyle}>In-truck tank level</td>
-                <td style={tdStyle}>Capacitive or ultrasonic tank-level sender (same category as RV/marine tanks)</td>
-                <td style={tdStyle}>Standalone dash readout; becomes system data only via radio relay</td>
-                <td style={tdStyle}>Robust vehicle-grade sensor</td>
-                <td style={tdStyle}>
-                  Vehicle-grade senders are commonly rated to -40°C (automotive standard) — spec explicitly for
-                  -49°C+ lows; heated cab readout, insulated tank compartment
-                </td>
-              </tr>
-              <tr>
-                <td style={tdStyle}>Water actually dispensed</td>
-                <td style={tdStyle}>Inline flow meter (paddlewheel/turbine) on the delivery hose</td>
-                <td style={tdStyle}>Same as above</td>
-                <td style={tdStyle}>
-                  The real differentiator vs. just mirroring house sensors — confirms what left the truck, not
-                  just what&apos;s in the house tank
-                </td>
-                <td style={tdStyle}>
-                  Hose/meter only sees flowing (self-warming) water during active transfer — main risk is the
-                  hose freezing between deliveries, not the meter&apos;s static rating; drain/blow out hose after
-                  each delivery
-                </td>
-              </tr>
-            </tbody>
-          </table>
+              </select>
+            </label>
+
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Household (if Delivered)</span>
+              <select value={householdId} onChange={(e) => setHouseholdId(e.target.value)} style={selectStyle}>
+                <option>—</option>
+                {hhIds.map((id) => (
+                  <option key={id}>{id}</option>
+                ))}
+              </select>
+            </label>
+
+            <button
+              type="submit"
+              style={{
+                alignSelf: "flex-start",
+                fontSize: "1rem",
+                fontWeight: 700,
+                padding: "0.65rem 1.2rem",
+                borderRadius: 12,
+                border: "2px solid var(--teal)",
+                background: "var(--teal-tint)",
+                color: "var(--teal)",
+                cursor: "pointer",
+              }}
+            >
+              Log radio check-in
+            </button>
+            {successMsg && <p style={{ color: "var(--green)", fontSize: "0.85rem", fontWeight: 600, margin: 0 }}>{successMsg}</p>}
+          </form>
         </div>
-      </details>
+
+        <div style={{ flex: "1 1 auto", display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <h2 style={{ fontSize: "1.15rem", flexShrink: 0 }}>Recent check-ins</h2>
+          {recent.length === 0 ? (
+            <p style={{ color: "var(--ink-soft)", fontSize: "0.85rem", flexShrink: 0 }}>No check-ins logged yet.</p>
+          ) : (
+            <>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 0.9rem", margin: "0.4rem 0 0.6rem", fontSize: "0.74rem", color: "var(--ink-soft)", flexShrink: 0 }}>
+                {STATUS_CODES.map((s) => (
+                  <span key={s} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: STATUS_META[s].color, display: "inline-block" }} />
+                    {s}
+                  </span>
+                ))}
+              </div>
+              {/* Already capped to the 10 most recent entries (see `recent`
+                  above) since this is explicitly a "recent" list — plus an
+                  internal, contained scroll here as a safety net so a full
+                  10-entry rail can never grow the page itself. */}
+              <div className="aq-checkin-rail" style={{ flex: "1 1 auto", overflowY: "auto", minHeight: 0, paddingRight: 4 }}>
+                {recent.map((entry) => {
+                  const meta = STATUS_META[entry.status];
+                  const kind = TRUCK_KIND[entry.truckId];
+                  return (
+                    <div key={entry.ts} className="aq-checkin-item">
+                      <div className="aq-checkin-marker" style={{ background: meta.tint }}>
+                        <StatusGlyph status={entry.status} color={meta.color} />
+                      </div>
+                      <div className="card" style={{ flex: 1, minWidth: 0, padding: "0.6rem 0.85rem" }}>
+                        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "0.5rem" }}>
+                          <strong style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem" }}>
+                            {new Date(entry.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}
+                          </strong>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.85rem", fontWeight: 600 }}>
+                            <span style={{ width: 7, height: 7, borderRadius: "50%", background: FLEET_COLOR[kind], display: "inline-block" }} />
+                            {entry.truckId}
+                          </span>
+                          <span style={{ fontWeight: 700, color: meta.color, fontSize: "0.85rem" }}>{entry.status}</span>
+                        </div>
+                        <div style={{ color: "var(--ink-soft)", fontSize: "0.8rem", marginTop: 2 }}>
+                          {entry.community}
+                          {entry.householdId !== "—" && <> &middot; {entry.householdId}</>}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          <details style={{ marginTop: "0.6rem", flexShrink: 0 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 600 }}>Sensor list used at this stage</summary>
+            <div style={{ overflow: "auto", marginTop: "0.6rem", maxHeight: 160 }}>
+              <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.82rem" }}>
+                <thead>
+                  <tr>
+                    {["Measurement", "Sensor type", "Connectivity need", "Maintenance note", "Cold-weather note"].map((hd) => (
+                      <th key={hd} style={{ textAlign: "left", padding: "6px 10px", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap" }}>
+                        {hd}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={tdStyle}>In-truck tank level</td>
+                    <td style={tdStyle}>Capacitive or ultrasonic tank-level sender (same category as RV/marine tanks)</td>
+                    <td style={tdStyle}>Standalone dash readout; becomes system data only via radio relay</td>
+                    <td style={tdStyle}>Robust vehicle-grade sensor</td>
+                    <td style={tdStyle}>
+                      Vehicle-grade senders are commonly rated to -40°C (automotive standard) — spec explicitly for
+                      -49°C+ lows; heated cab readout, insulated tank compartment
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={tdStyle}>Water actually dispensed</td>
+                    <td style={tdStyle}>Inline flow meter (paddlewheel/turbine) on the delivery hose</td>
+                    <td style={tdStyle}>Same as above</td>
+                    <td style={tdStyle}>
+                      The real differentiator vs. just mirroring house sensors — confirms what left the truck, not
+                      just what&apos;s in the house tank
+                    </td>
+                    <td style={tdStyle}>
+                      Hose/meter only sees flowing (self-warming) water during active transfer — main risk is the
+                      hose freezing between deliveries, not the meter&apos;s static rating; drain/blow out hose after
+                      each delivery
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </details>
+        </div>
+      </div>
 
       <style>{`
         @keyframes aq-log-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
@@ -310,7 +327,7 @@ export default function TruckPage() {
         .aq-checkin-item { position: relative; display: flex; gap: 12px; align-items: flex-start; margin-bottom: 0.6rem; animation: aq-log-in 380ms cubic-bezier(0.16,1,0.3,1) both; }
         .aq-checkin-marker { position: relative; z-index: 1; width: 31px; height: 31px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
       `}</style>
-    </main>
+    </SingleScreenPage>
   );
 }
 

@@ -6,11 +6,11 @@
  * households).
  */
 
-import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
-import PageHeader from "@/components/PageHeader";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import Badge from "@/components/Badge";
 import BoilWaterBanner from "@/components/BoilWaterBanner";
 import InfoIcon from "@/components/InfoIcon";
+import SingleScreenTabs, { SingleScreenPage, type ScreenTab } from "@/components/SingleScreenTabs";
 import { LEVEL_BAR_COLOR } from "@/components/TankSvg";
 import { useNow } from "@/lib/useNow";
 import { useHouseholds } from "@/lib/householdStore";
@@ -175,41 +175,11 @@ export default function PlantPage() {
     );
   }, [filteredRows]);
 
-  return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: "20px 16px 60px" }}>
-      <PageHeader title="Treatment facility" subtitle="One of the two fixed points with reliable connectivity (the other is houses)" />
-
-      {boilActive && <BoilWaterBanner />}
-
+  const plantStatusTab: ReactNode = (
+    <div style={{ height: "100%", overflowY: "auto", paddingRight: 4 }}>
       <div
         className="card"
-        style={{ marginBottom: "1rem", background: "var(--teal-tint)", borderColor: "var(--teal)", display: "flex", flexWrap: "wrap", gap: "0.4rem 0.6rem", alignItems: "center" }}
-      >
-        <Badge label="Already monitored weekly" variant="low" title="Coliform testing at the plant is already standard practice in comparable northern systems." />
-        <InfoIcon label="What this page does and doesn't cover">
-          The gap this system targets is everything <em>after</em> water leaves here (truck → tank → tap), not
-          the plant.
-        </InfoIcon>
-      </div>
-
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, maxWidth: 280, marginBottom: "0.75rem" }}>
-        <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Facility serving</span>
-        <select
-          value={community}
-          onChange={(e) => setCommunity(e.target.value)}
-          style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
-        >
-          {COMMUNITY_NAMES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <div
-        className="card"
-        style={{ margin: "1rem 0", display: "flex", flexWrap: "wrap", gap: "1.25rem", alignItems: "stretch" }}
+        style={{ margin: 0, display: "flex", flexWrap: "wrap", gap: "1.25rem", alignItems: "stretch" }}
       >
         <div
           className="aq-facility-anchor"
@@ -261,13 +231,48 @@ export default function PlantPage() {
         </div>
       </div>
 
-      <h2 style={{ fontSize: "1.3rem", marginTop: "1.5rem", display: "flex", alignItems: "center", gap: 8 }}>
+      <details style={{ marginTop: "1rem" }}>
+        <summary style={{ cursor: "pointer", fontWeight: 600 }}>Sensor list used at this stage</summary>
+        <div style={{ overflowX: "auto", marginTop: "0.75rem" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.82rem" }}>
+            <thead>
+              <tr>
+                {["Measurement", "Sensor type", "Notes", "Cold-weather note"].map((hd) => (
+                  <th key={hd} style={{ textAlign: "left", padding: "6px 10px", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap" }}>
+                    {hd}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style={tdStyle}>Chlorine dosing/residual</td>
+                <td style={tdStyle}>Continuous amperometric or colorimetric bench-style analyzer</td>
+                <td style={tdStyle}>Standard practice in comparable northern systems already — least new work needed here</td>
+                <td style={tdStyle}>Housed inside the heated plant building — no direct cold exposure</td>
+              </tr>
+              <tr>
+                <td style={tdStyle}>Coliform testing</td>
+                <td style={tdStyle}>Weekly lab/field test (existing practice per reference material)</td>
+                <td style={tdStyle}>The gap this system targets is <em>after</em> this point, not here</td>
+                <td style={tdStyle}>Performed indoors at the plant — no cold-weather hardening needed</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  );
+
+  const logBatchTab: ReactNode = (
+    <div style={{ height: "100%", overflowY: "auto", paddingRight: 4 }}>
+      <h2 style={{ fontSize: "1.1rem", marginTop: 0, display: "flex", alignItems: "center", gap: 8 }}>
         Log a treated batch
         <InfoIcon label="Why dropdowns, not free text">
           Pre-made choices, not free text — fast to fill in while running the plant.
         </InfoIcon>
       </h2>
-      <form onSubmit={handleSubmit} className="card" style={{ display: "flex", flexDirection: "column", gap: "0.9rem" }}>
+      <form onSubmit={handleSubmit} className="card" style={{ display: "flex", flexDirection: "column", gap: "0.9rem", maxWidth: 640 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Chlorine dose applied (mg/L): {dose.toFixed(1)}</span>
           <input
@@ -401,6 +406,94 @@ export default function PlantPage() {
           </div>
         )}
       </form>
+    </div>
+  );
+
+  const householdNetworkTab: ReactNode = (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ flexShrink: 0 }}>
+        <h2 style={{ fontSize: "1.1rem", marginTop: 0, display: "flex", alignItems: "center", gap: 8 }}>
+          Household network — {community}
+          <InfoIcon label="What this section is for">
+            Operator-facing detail the community-wide maps don&apos;t show: every household this facility serves,
+            its distance from the plant, which cluster it&apos;s in, and its current water/sewage status — for
+            routing/logistics judgment calls, not the public overview.
+          </InfoIcon>
+        </h2>
+
+        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", margin: "0.5rem 0" }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220 }}>
+            <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Filter by cluster</span>
+            <select
+              value={clusterFilter}
+              onChange={(e) => setClusterFilter(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
+            >
+              <option>All clusters</option>
+              {presentClusters.map((c) => (
+                <option key={c}>{c}</option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220 }}>
+            <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Sort by</span>
+            <select
+              value={sortChoice}
+              onChange={(e) => setSortChoice(e.target.value)}
+              style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
+            >
+              {["Urgency (highest first)", "Distance (near → far)", "Distance (far → near)", "Household ID"].map((o) => (
+                <option key={o}>{o}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <p style={{ color: "var(--ink-soft)", fontSize: "0.78rem", margin: "0 0 0.4rem" }}>
+          Showing {filteredRows.length} of {networkRows.length} households monitored in {community}.
+        </p>
+
+        {networkRows.length > 0 && <DistanceTrack rows={networkRows} highlighted={filteredRows} />}
+      </div>
+
+      <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingRight: 4 }}>
+        {groupedRows.map(({ cluster, rows }) => (
+          <div key={cluster} style={{ marginTop: "0.9rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.5rem" }}>
+              <h3 style={{ fontSize: "0.95rem", margin: 0 }}>{cluster}</h3>
+              <span style={{ color: "var(--ink-soft)", fontSize: "0.78rem" }}>&middot; {rows.length} household(s)</span>
+            </div>
+            {rows.map((r) => (
+              <div key={r.id} className="card" style={{ marginBottom: "0.5rem", padding: "0.6rem 0.9rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
+                  <div>
+                    <strong>{r.id}</strong>{" "}
+                    <span style={{ color: "var(--ink-soft)", fontSize: "0.82rem" }}>
+                      &middot; {r.size} people &middot; {r.distKm.toFixed(1)} km from facility
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: "0.4rem" }}>
+                    <Badge label={r.water.label} variant={r.water.variant} title={r.water.action} />
+                    <Badge label={r.sewage.label} variant={r.sewage.variant} title={r.sewage.action} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+        {filteredRows.length === 0 && <p style={{ color: "var(--ink-soft)", fontSize: "0.85rem" }}>No households match this filter.</p>}
+      </div>
+    </div>
+  );
+
+  const tabs: ScreenTab[] = [
+    { id: "status", label: "Plant status", content: plantStatusTab },
+    { id: "log", label: "Log a batch", content: logBatchTab },
+    { id: "network", label: "Household network", content: householdNetworkTab },
+  ];
+
+  return (
+    <SingleScreenPage>
       <style>{`
         @keyframes aq-success-enter { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes aq-check-draw { to { stroke-dashoffset: 0; } }
@@ -416,108 +509,53 @@ export default function PlantPage() {
         .aq-cluster-dot { flex-shrink: 0; }
       `}</style>
 
-      <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "1.5rem 0" }} />
+      <div style={{ flexShrink: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "0.4rem 1rem",
+            padding: "2px 2px 8px",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <h1 style={{ fontSize: "1.15rem", margin: 0, lineHeight: 1.25 }}>Treatment facility</h1>
+            <p style={{ margin: "1px 0 0", fontSize: "0.74rem", color: "var(--ink-soft)" }}>
+              One of the two fixed points with reliable connectivity (the other is houses)
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+            <Badge label="Already monitored weekly" variant="low" title="Coliform testing at the plant is already standard practice in comparable northern systems." />
+            <InfoIcon label="What this page does and doesn't cover">
+              The gap this system targets is everything <em>after</em> water leaves here (truck → tank → tap), not
+              the plant.
+            </InfoIcon>
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: "0.78rem", fontWeight: 600 }}>Facility serving</span>
+              <select
+                value={community}
+                onChange={(e) => setCommunity(e.target.value)}
+                style={{ padding: "6px 9px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)", fontSize: "0.85rem" }}
+              >
+                {COMMUNITY_NAMES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
 
-      <h2 style={{ fontSize: "1.3rem", display: "flex", alignItems: "center", gap: 8 }}>
-        Household network — {community}
-        <InfoIcon label="What this section is for">
-          Operator-facing detail the community-wide maps don&apos;t show: every household this facility serves,
-          its distance from the plant, which cluster it&apos;s in, and its current water/sewage status — for
-          routing/logistics judgment calls, not the public overview.
-        </InfoIcon>
-      </h2>
-
-      <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", margin: "0.75rem 0" }}>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220 }}>
-          <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Filter by cluster</span>
-          <select
-            value={clusterFilter}
-            onChange={(e) => setClusterFilter(e.target.value)}
-            style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
-          >
-            <option>All clusters</option>
-            {presentClusters.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </select>
-        </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220 }}>
-          <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Sort by</span>
-          <select
-            value={sortChoice}
-            onChange={(e) => setSortChoice(e.target.value)}
-            style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
-          >
-            {["Urgency (highest first)", "Distance (near → far)", "Distance (far → near)", "Household ID"].map((o) => (
-              <option key={o}>{o}</option>
-            ))}
-          </select>
-        </label>
+        {boilActive && <BoilWaterBanner />}
       </div>
 
-      <p style={{ color: "var(--ink-soft)", fontSize: "0.8rem" }}>
-        Showing {filteredRows.length} of {networkRows.length} households monitored in {community}.
-      </p>
-
-      {networkRows.length > 0 && <DistanceTrack rows={networkRows} highlighted={filteredRows} />}
-
-      {groupedRows.map(({ cluster, rows }) => (
-        <div key={cluster} style={{ marginTop: "1.1rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.5rem" }}>
-            <h3 style={{ fontSize: "0.95rem", margin: 0 }}>{cluster}</h3>
-            <span style={{ color: "var(--ink-soft)", fontSize: "0.78rem" }}>&middot; {rows.length} household(s)</span>
-          </div>
-          {rows.map((r) => (
-            <div key={r.id} className="card" style={{ marginBottom: "0.5rem", padding: "0.6rem 0.9rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
-                <div>
-                  <strong>{r.id}</strong>{" "}
-                  <span style={{ color: "var(--ink-soft)", fontSize: "0.82rem" }}>
-                    &middot; {r.size} people &middot; {r.distKm.toFixed(1)} km from facility
-                  </span>
-                </div>
-                <div style={{ display: "flex", gap: "0.4rem" }}>
-                  <Badge label={r.water.label} variant={r.water.variant} title={r.water.action} />
-                  <Badge label={r.sewage.label} variant={r.sewage.variant} title={r.sewage.action} />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
-      {filteredRows.length === 0 && <p style={{ color: "var(--ink-soft)", fontSize: "0.85rem" }}>No households match this filter.</p>}
-
-      <details style={{ marginTop: "1.5rem" }}>
-        <summary style={{ cursor: "pointer", fontWeight: 600 }}>Sensor list used at this stage</summary>
-        <div style={{ overflowX: "auto", marginTop: "0.75rem" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.82rem" }}>
-            <thead>
-              <tr>
-                {["Measurement", "Sensor type", "Notes", "Cold-weather note"].map((hd) => (
-                  <th key={hd} style={{ textAlign: "left", padding: "6px 10px", borderBottom: "2px solid var(--border)", whiteSpace: "nowrap" }}>
-                    {hd}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td style={tdStyle}>Chlorine dosing/residual</td>
-                <td style={tdStyle}>Continuous amperometric or colorimetric bench-style analyzer</td>
-                <td style={tdStyle}>Standard practice in comparable northern systems already — least new work needed here</td>
-                <td style={tdStyle}>Housed inside the heated plant building — no direct cold exposure</td>
-              </tr>
-              <tr>
-                <td style={tdStyle}>Coliform testing</td>
-                <td style={tdStyle}>Weekly lab/field test (existing practice per reference material)</td>
-                <td style={tdStyle}>The gap this system targets is <em>after</em> this point, not here</td>
-                <td style={tdStyle}>Performed indoors at the plant — no cold-weather hardening needed</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </details>
-    </main>
+      <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+        <SingleScreenTabs tabs={tabs} />
+      </div>
+    </SingleScreenPage>
   );
 }
 

@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import PageHeader from "@/components/PageHeader";
+import SingleScreenTabs, { SingleScreenPage } from "@/components/SingleScreenTabs";
 import Badge from "@/components/Badge";
 import TankSvg from "@/components/TankSvg";
 import TankCyclePreview from "@/components/TankCyclePreview";
@@ -128,40 +128,10 @@ export default function HousesPage() {
 
   const h = households.find((hh) => hh.id === effectiveSelectedId) ?? null;
 
-  return (
-    <main style={{ maxWidth: 900, margin: "0 auto", padding: "20px 16px 60px" }}>
-      <PageHeader
-        title="Houses"
-        subtitle="What a household water tank, sewage tank, or backup button would report"
-      />
-
-      {boilActive && <BoilWaterBanner />}
-
-      <div
-        className="card"
-        style={{
-          marginBottom: "1rem",
-          background: "var(--teal-tint)",
-          borderColor: "var(--teal)",
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "0.4rem 0.6rem",
-          alignItems: "center",
-        }}
-      >
-        <Badge
-          label="Demo only"
-          variant="medium"
-          title="Residents don't operate this page — it shows judges/the team what a sensor or backup button reports."
-        />
-        <InfoIcon label="Why this page is demo-only">
-          Residents don&apos;t operate this page — it shows what a sensor (or, until installed, a simple
-          wired backup button) reports. Try one below on a house marked &ldquo;no sensor yet.&rdquo;
-        </InfoIcon>
-      </div>
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem", marginBottom: "0.75rem" }}>
-        <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220 }}>
+  const liveReadingTab = (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, gap: "0.6rem" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "1.2rem", flexShrink: 0 }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 200 }}>
           <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>Community</span>
           <select
             value={community}
@@ -178,50 +148,47 @@ export default function HousesPage() {
             ))}
           </select>
         </label>
+
+        <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220 }}>
+          <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>
+            Household ({households.length} in {community}, most urgent first)
+          </span>
+          <select
+            value={effectiveSelectedId ?? ""}
+            onChange={(e) => setSelectedId(e.target.value)}
+            style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)", maxWidth: 320 }}
+          >
+            {householdsSorted.map((hh) => (
+              <option key={hh.id} value={hh.id}>
+                {hh.id}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem", color: "var(--ink-soft)", paddingBottom: 9 }}>
+          <span>
+            Ambient temperature:{" "}
+            <strong style={{ color: "var(--ink)", fontFamily: "var(--font-mono)" }}>
+              {tempC === null ? "…" : `${tempC.toFixed(1)}°C`}
+            </strong>
+            {tempC !== null && <span className="aq-live-dot" title="Live reading" />}
+          </span>
+          <InfoIcon label="Reading source and demo scope">
+            Source: {tempSource || "loading"}. {REGION_NAME} region has {REGION_COMMUNITY_COUNT} communities total —
+            this demo covers 4.
+          </InfoIcon>
+        </div>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem", color: "var(--ink-soft)" }}>
-        <span>
-          Ambient temperature:{" "}
-          <strong style={{ color: "var(--ink)", fontFamily: "var(--font-mono)" }}>
-            {tempC === null ? "…" : `${tempC.toFixed(1)}°C`}
-          </strong>
-          {tempC !== null && <span className="aq-live-dot" title="Live reading" />}
-        </span>
-        <InfoIcon label="Reading source and demo scope">
-          Source: {tempSource || "loading"}. {REGION_NAME} region has {REGION_COMMUNITY_COUNT} communities total —
-          this demo covers 4.
-        </InfoIcon>
-      </div>
-
-      {crisisMessage && <CrisisBanner message={crisisMessage} />}
-
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: "1rem" }}>
-        <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>
-          Household ({households.length} in {community}, most urgent first)
-        </span>
-        <select
-          value={effectiveSelectedId ?? ""}
-          onChange={(e) => setSelectedId(e.target.value)}
-          style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)", maxWidth: 320 }}
-        >
-          {householdsSorted.map((hh) => (
-            <option key={hh.id} value={hh.id}>
-              {hh.id}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      {h && tempC !== null && (
-        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+      {h && tempC !== null ? (
+        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
           <div style={{ flex: "2 1 420px", minWidth: 280 }}>
             {h.hasAutoSensor ? (
               <AutoSensorCard h={h} tempC={tempC} now={now} />
             ) : (
               <ManualCard h={h} now={now} />
             )}
-            <TankCyclePreview h={h} tempC={tempC} />
           </div>
           <div style={{ flex: "1 1 200px", minWidth: 220 }}>
             {!h.hasAutoSensor && (
@@ -248,11 +215,32 @@ export default function HousesPage() {
             )}
           </div>
         </div>
+      ) : (
+        <div style={{ flex: "1 1 auto", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--ink-soft)", fontSize: "0.85rem" }}>
+          Loading current readings…
+        </div>
       )}
+    </div>
+  );
 
-      <details style={{ marginTop: "1.5rem" }}>
-        <summary style={{ cursor: "pointer", fontWeight: 600 }}>Sensor list used at the household stage</summary>
-        <div style={{ overflowX: "auto", marginTop: "0.75rem" }}>
+  const fillCycleTab =
+    h && tempC !== null ? (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", minHeight: 0, overflowY: "auto" }}>
+        <div style={{ maxWidth: 640, width: "100%" }}>
+          <TankCyclePreview h={h} tempC={tempC} />
+        </div>
+      </div>
+    ) : (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--ink-soft)", fontSize: "0.85rem" }}>
+        Loading current readings…
+      </div>
+    );
+
+  const sensorListTab = (
+    <div style={{ height: "100%", minHeight: 0, overflowY: "auto" }}>
+      <div className="card">
+        <div style={{ fontWeight: 700, marginBottom: "0.75rem" }}>Sensor list used at the household stage</div>
+        <div style={{ overflowX: "auto" }}>
           <SensorTable
             rows={[
               [
@@ -286,8 +274,47 @@ export default function HousesPage() {
             ]}
           />
         </div>
-      </details>
-    </main>
+      </div>
+    </div>
+  );
+
+  return (
+    <SingleScreenPage>
+      <div style={{ flexShrink: 0 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: "0.3rem 1rem", marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "baseline", flexWrap: "wrap", gap: "0.3rem 0.7rem" }}>
+            <h1 style={{ fontSize: "1.4rem" }}>Houses</h1>
+            <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--ink-soft)" }}>
+              What a household water tank, sewage tank, or backup button would report
+            </p>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+            <Badge
+              label="Demo only"
+              variant="medium"
+              title="Residents don't operate this page — it shows judges/the team what a sensor or backup button reports."
+            />
+            <InfoIcon label="Why this page is demo-only">
+              Residents don&apos;t operate this page — it shows what a sensor (or, until installed, a simple
+              wired backup button) reports. Try one below on a house marked &ldquo;no sensor yet.&rdquo;
+            </InfoIcon>
+          </div>
+        </div>
+
+        {boilActive && <BoilWaterBanner />}
+        {crisisMessage && <CrisisBanner message={crisisMessage} />}
+      </div>
+
+      <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+        <SingleScreenTabs
+          tabs={[
+            { id: "live", label: "Live reading", content: liveReadingTab },
+            { id: "cycle", label: "Fill-cycle preview", content: fillCycleTab },
+            { id: "sensors", label: "Sensor list", content: sensorListTab },
+          ]}
+        />
+      </div>
+    </SingleScreenPage>
   );
 }
 

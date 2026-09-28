@@ -24,6 +24,7 @@ import Badge from "@/components/Badge";
 import InfoIcon from "@/components/InfoIcon";
 import TankSvg from "@/components/TankSvg";
 import TruckIcon from "@/components/TruckIcon";
+import SingleScreenTabs, { SingleScreenPage } from "@/components/SingleScreenTabs";
 import { useHouseholds } from "@/lib/householdStore";
 import { useNow } from "@/lib/useNow";
 import {
@@ -213,6 +214,12 @@ export default function CommunitiesPage() {
   const [temps, setTemps] = useState<Record<string, { tempC: number; source: string }>>(() =>
     Object.fromEntries(communityNames.map((name) => [name, { tempC: FALLBACK_TEMP_C, source: "loading…" }])),
   );
+  // Which community the "Household levels" tab shows in full detail — that
+  // tab can only fit one community's full tile grid at a time on one screen,
+  // so it uses the same select-a-community pattern as the Houses page rather
+  // than stacking all 4 communities' grids (which is what made this page one
+  // of the tallest in the app before the single-screen pass).
+  const [selectedCommunity, setSelectedCommunity] = useState<string>(communityNames[0]);
 
   useEffect(() => {
     let cancelled = false;
@@ -233,12 +240,12 @@ export default function CommunitiesPage() {
 
   if (!mounted) {
     return (
-      <main style={{ maxWidth: 1040, margin: "0 auto", padding: "24px 20px 60px" }}>
+      <SingleScreenPage>
         <PageHeader
           title="Communities"
           subtitle={`${REGION_NAME} region has ${REGION_COMMUNITY_COUNT} communities in total — this demo covers 4`}
         />
-      </main>
+      </SingleScreenPage>
     );
   }
 
@@ -255,6 +262,26 @@ export default function CommunitiesPage() {
       counts[hWorst] += 1;
       worst = worstVariant(worst, hWorst);
     }
+
+    // Per-household detail rows (water/sewage %, sorted highest-risk first) —
+    // computed once per community here so both the household-levels tab and
+    // the "needs a truck soon" flag can reuse it.
+    const detailRows = hhHere
+      .map((h) => {
+        const usedL = currentUsedL(h, now);
+        const waterRemainingPct = 100 * (1 - usedL / h.tankCapacityL);
+        const waterVariant = waterQualityVariant(h, tempC, now);
+        const sewagePct = currentSewagePct(h, now);
+        const sewVariant = sewageStatus(sewagePct).variant;
+        const urgency =
+          Math.max(RANK[waterVariant], RANK[sewVariant]) * 1000 + (100 - waterRemainingPct) + sewagePct;
+        return { h, waterRemainingPct, waterVariant, sewagePct, sewVariant, urgency };
+      })
+      .sort((a, b) => b.urgency - a.urgency);
+
+    const communityNeedsTruck =
+      hhHere.some((h) => predictedNeedsTruck(h, tempC, now)) || hhHere.some((h) => currentSewagePct(h, now) >= 90);
+
     return {
       name,
       coords,
@@ -262,6 +289,8 @@ export default function CommunitiesPage() {
       hhHere,
       worst,
       counts,
+      detailRows,
+      communityNeedsTruck,
       estLow: coords.population * PER_CAPITA_LOW_LPD,
       estHigh: coords.population * PER_CAPITA_HIGH_LPD,
     };
@@ -298,18 +327,18 @@ export default function CommunitiesPage() {
     };
   });
 
-  return (
-    <main style={{ maxWidth: 1040, margin: "0 auto", padding: "24px 20px 60px" }}>
-      <PageHeader
-        title="Communities"
-        subtitle={`${REGION_NAME} region has ${REGION_COMMUNITY_COUNT} communities in total — this demo covers 4`}
-      />
+  const selectedRow = rows.find((r) => r.name === selectedCommunity) ?? rows[0];
+  const selectedShown = selectedRow.detailRows;
 
+  // --- Tab 1: the 4 small "does the truck need to leave?" scatter maps, plus
+  // the legend/positions-disclaimer strip that explains how to read them. ---
+  const predictionMapsTab = (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
       <div
         className="card"
-        style={{ marginBottom: 18, background: "var(--gold-tint)", borderColor: "var(--gold)" }}
+        style={{ background: "var(--gold-tint)", borderColor: "var(--gold)", padding: "8px 14px", marginBottom: 8, flexShrink: 0 }}
       >
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 6 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <Badge
             label="Red = predicted (~1 day ahead)"
             variant="high"
@@ -325,15 +354,26 @@ export default function CommunitiesPage() {
         </div>
       </div>
 
-      <h2 className="eyebrow" style={{ marginTop: 0 }}>Household prediction map — does the truck need to leave?</h2>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-          gap: 14,
-          marginBottom: 10,
-        }}
-      >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, flexShrink: 0, marginBottom: 8 }}>
+        <h2 className="eyebrow" style={{ margin: 0 }}>Household prediction map — does the truck need to leave?</h2>
+        {needsTruckSoon.length > 0 ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <Badge
+              label={`${needsTruckSoon.length} need the truck within ~1 day`}
+              variant="high"
+              title="Predicted from each household's current water-use and sewage-fill rate — see the Houses page for individual detail."
+            />
+            <span style={{ color: "var(--ink-soft)", fontSize: "0.78rem" }}>
+              {needsTruckSoon.slice(0, 6).join(", ")}
+              {needsTruckSoon.length > 6 ? ` · +${needsTruckSoon.length - 6} more` : ""}
+            </span>
+          </div>
+        ) : (
+          <Badge label="No trucks needed within ~1 day" variant="low" />
+        )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gridTemplateRows: "1fr", gap: 12, flex: "1 1 auto", minHeight: 0 }}>
         {rows.map(({ name, coords, hhHere, tempC }) => {
           const points = hhHere.map((h) => {
             const [hlat, hlon] = jitteredPosition(h.id, coords.lat, coords.lon);
@@ -342,193 +382,199 @@ export default function CommunitiesPage() {
           });
           const redCount = points.filter((p) => p.predicted).length;
           return (
-            <div key={name} className="card">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-                <strong style={{ fontSize: "0.88rem" }}>{name}</strong>
-                <span style={{ fontSize: "0.72rem", color: "var(--ink-soft)" }}>{redCount}/{points.length} soon</span>
+            <div key={name} className="card" style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, padding: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4, flexShrink: 0 }}>
+                <strong style={{ fontSize: "0.86rem" }}>{name}</strong>
+                <span style={{ fontSize: "0.7rem", color: "var(--ink-soft)" }}>{redCount}/{points.length} soon</span>
               </div>
-              <svg viewBox={`0 0 ${LOCAL_SIZE} ${LOCAL_SIZE}`} style={{ width: "100%", height: "auto" }} role="img" aria-label={`Household predictions for ${name}`}>
-                <rect x={0} y={0} width={LOCAL_SIZE} height={LOCAL_SIZE} rx={10} style={{ fill: "var(--surface-raised)" }} />
-                {points.map((p) => (
-                  <g key={p.id}>
-                    {p.predicted && (
-                      <>
-                        <circle className="pg-sonar-ring a" cx={p.x} cy={p.y} r={5} />
-                        <circle className="pg-sonar-ring b" cx={p.x} cy={p.y} r={5} />
-                      </>
-                    )}
-                    <circle
-                      cx={p.x}
-                      cy={p.y}
-                      r={4}
-                      style={{ fill: p.predicted ? "var(--danger)" : "var(--green)" }}
-                    >
-                      <title>{`${p.id}${p.predicted ? " — predicted to need a truck within ~1 day" : " — OK"}`}</title>
-                    </circle>
-                  </g>
-                ))}
-              </svg>
+              <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg
+                  viewBox={`0 0 ${LOCAL_SIZE} ${LOCAL_SIZE}`}
+                  style={{ width: "100%", height: "100%", display: "block" }}
+                  role="img"
+                  aria-label={`Household predictions for ${name}`}
+                >
+                  <rect x={0} y={0} width={LOCAL_SIZE} height={LOCAL_SIZE} rx={10} style={{ fill: "var(--surface-raised)" }} />
+                  {points.map((p) => (
+                    <g key={p.id}>
+                      {p.predicted && (
+                        <>
+                          <circle className="pg-sonar-ring a" cx={p.x} cy={p.y} r={5} />
+                          <circle className="pg-sonar-ring b" cx={p.x} cy={p.y} r={5} />
+                        </>
+                      )}
+                      <circle
+                        cx={p.x}
+                        cy={p.y}
+                        r={4}
+                        style={{ fill: p.predicted ? "var(--danger)" : "var(--green)" }}
+                      >
+                        <title>{`${p.id}${p.predicted ? " — predicted to need a truck within ~1 day" : " — OK"}`}</title>
+                      </circle>
+                    </g>
+                  ))}
+                </svg>
+              </div>
             </div>
           );
         })}
       </div>
+    </div>
+  );
 
-      {needsTruckSoon.length > 0 ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", margin: "6px 0 22px" }}>
-          <Badge
-            label={`${needsTruckSoon.length} need the truck within ~1 day`}
-            variant="high"
-            title="Predicted from each household's current water-use and sewage-fill rate — see the Houses page for individual detail."
-          />
-          <span style={{ color: "var(--ink-soft)", fontSize: "0.82rem" }}>
-            {needsTruckSoon.slice(0, 6).join(", ")}
-            {needsTruckSoon.length > 6 ? ` · +${needsTruckSoon.length - 6} more` : ""}
-          </span>
+  // --- Tab 2: the compact 4-community overview map alongside a 2x2 grid of
+  // per-community summary cards (side-by-side instead of stacked, so all 4
+  // communities' summaries are visible without any scrolling). ---
+  const overviewSummaryTab = (
+    <div style={{ height: "100%", display: "flex", gap: 14, minHeight: 0 }}>
+      <div className="card" style={{ flex: "0 0 290px", display: "flex", flexDirection: "column", minHeight: 0, padding: 12 }}>
+        <h2 className="eyebrow" style={{ marginTop: 0, marginBottom: 6, flexShrink: 0 }}>
+          Community overview map
+          <InfoIcon label="How to read this map">
+            Marker size = population, colour = worst current household status in that community.
+          </InfoIcon>
+        </h2>
+        <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <svg viewBox={`0 0 ${OVERVIEW_SIZE} ${OVERVIEW_SIZE}`} style={{ width: "100%", height: "100%", maxWidth: 260, maxHeight: 260 }} role="img" aria-label="Community overview map">
+            {rows.map(({ name, coords, worst }) => {
+              const [x, y] = projectOverview(coords.lat, coords.lon);
+              const r = Math.max(10, Math.sqrt(coords.population) / 2.4);
+              return (
+                <g key={name}>
+                  <circle cx={x} cy={y} r={r} style={{ fill: VARIANT_COLOR[worst], opacity: 0.85 }}>
+                    <title>{`${name} — population ~${coords.population.toLocaleString()}, worst status: ${worst}`}</title>
+                  </circle>
+                  <text x={x} y={y + r + 14} textAnchor="middle" style={{ fontSize: 11, fill: "var(--ink)" }}>
+                    {name}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
         </div>
-      ) : (
-        <div style={{ margin: "6px 0 22px" }}>
-          <Badge label="No trucks needed within ~1 day" variant="low" />
-        </div>
-      )}
-
-      <h2 className="eyebrow">
-        Community overview map
-        <InfoIcon label="How to read this map">
-          Marker size = population, colour = worst current household status in that community.
-        </InfoIcon>
-      </h2>
-      <div className="card" style={{ marginBottom: 22, display: "flex", justifyContent: "center" }}>
-        <svg viewBox={`0 0 ${OVERVIEW_SIZE} ${OVERVIEW_SIZE}`} width="100%" style={{ maxWidth: 360 }} role="img" aria-label="Community overview map">
-          {rows.map(({ name, coords, worst }) => {
-            const [x, y] = projectOverview(coords.lat, coords.lon);
-            const r = Math.max(10, Math.sqrt(coords.population) / 2.4);
-            return (
-              <g key={name}>
-                <circle cx={x} cy={y} r={r} style={{ fill: VARIANT_COLOR[worst], opacity: 0.85 }}>
-                  <title>{`${name} — population ~${coords.population.toLocaleString()}, worst status: ${worst}`}</title>
-                </circle>
-                <text x={x} y={y + r + 14} textAnchor="middle" style={{ fontSize: 11, fill: "var(--ink)" }}>
-                  {name}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
       </div>
 
-      <h2 className="eyebrow">Community summary</h2>
-      <div style={{ display: "grid", gap: 10, marginBottom: 24 }}>
-        {rows.map(({ name, coords, hhHere, worst, counts, tempC, estLow, estHigh }) => (
-          <div key={name} className="card">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
-              <strong style={{ fontSize: "1.15rem" }}>{name}</strong>
-              <span className={worst === "high" ? "pg-badge-pulse" : undefined}>
-                <Badge label={worst[0].toUpperCase() + worst.slice(1)} variant={worst} title={VARIANT_TOOLTIP[worst]} />
-              </span>
-            </div>
-            <p style={{ margin: "6px 0 0 0", color: "var(--ink-soft)", fontSize: "0.86rem" }}>
-              Population ~{coords.population.toLocaleString()} · {hhHere.length} household(s) monitored in this demo ·{" "}
-              {tempC.toFixed(1)}°C
-              <span className="pg-live-dot" title="Live ambient temperature reading" />
-              {" "}· est. daily water use {estLow.toLocaleString()}–{estHigh.toLocaleString()} L
-            </p>
+      <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <h2 className="eyebrow" style={{ marginTop: 0, marginBottom: 6, flexShrink: 0 }}>Community summary</h2>
+        <div style={{ flex: "1 1 auto", minHeight: 0, display: "grid", gridTemplateColumns: "1fr 1fr", gridTemplateRows: "1fr 1fr", gap: 10 }}>
+          {rows.map(({ name, coords, hhHere, worst, counts, tempC, estLow, estHigh }) => (
+            <div key={name} className="card" style={{ padding: 12, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                <strong style={{ fontSize: "1rem" }}>{name}</strong>
+                <span className={worst === "high" ? "pg-badge-pulse" : undefined}>
+                  <Badge label={worst[0].toUpperCase() + worst.slice(1)} variant={worst} title={VARIANT_TOOLTIP[worst]} />
+                </span>
+              </div>
+              <p style={{ margin: "4px 0 0 0", color: "var(--ink-soft)", fontSize: "0.78rem", lineHeight: 1.4 }}>
+                Pop. ~{coords.population.toLocaleString()} · {hhHere.length} household(s) ·{" "}
+                {tempC.toFixed(1)}°C
+                <span className="pg-live-dot" title="Live ambient temperature reading" />
+                {" "}· {estLow.toLocaleString()}–{estHigh.toLocaleString()} L/day
+              </p>
 
-            {/* Full risk distribution across every monitored household — not
-                just the single worst-case badge above, so a community with
-                one bad house and 20 fine ones reads differently from one
-                where most houses are struggling. */}
-            <div
-              style={{ display: "flex", height: 9, borderRadius: 99, overflow: "hidden", background: "var(--surface-raised)", marginTop: 10 }}
-              title={`${counts.high} needing a truck now · ${counts.medium} approaching a threshold · ${counts.low} OK`}
-            >
-              {(["high", "medium", "low"] as Variant[])
-                .filter((v) => counts[v] > 0)
-                .map((v) => (
-                  <div key={v} style={{ width: `${(counts[v] / Math.max(1, hhHere.length)) * 100}%`, background: VARIANT_COLOR[v] }} />
-                ))}
-            </div>
-            <div style={{ display: "flex", gap: 14, marginTop: 6, fontSize: "0.76rem", color: "var(--ink-soft)", flexWrap: "wrap" }}>
-              <span>
-                <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "var(--danger)", marginRight: 5 }} />
-                {counts.high} urgent
-              </span>
-              <span>
-                <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "var(--gold)", marginRight: 5 }} />
-                {counts.medium} watch
-              </span>
-              <span>
-                <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "var(--green)", marginRight: 5 }} />
-                {counts.low} OK
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <h2 className="eyebrow" style={{ marginBottom: 14 }}>
-        Household water &amp; sewage levels, by community
-        <InfoIcon label="How these are sorted">
-          Highest-risk households first — grouped so it&rsquo;s clear which community actually needs a truck, not just
-          which single house.
-        </InfoIcon>
-      </h2>
-      <div style={{ display: "grid", gap: 10, marginBottom: 24 }}>
-        {rows.map(({ name, hhHere, tempC }) => {
-          const communityNeedsTruck =
-            hhHere.some((h) => predictedNeedsTruck(h, tempC, now)) ||
-            hhHere.some((h) => currentSewagePct(h, now) >= 90);
-
-          const detailRows = hhHere
-            .map((h) => {
-              const usedL = currentUsedL(h, now);
-              const waterRemainingPct = 100 * (1 - usedL / h.tankCapacityL);
-              const waterVariant = waterQualityVariant(h, tempC, now);
-              const sewagePct = currentSewagePct(h, now);
-              const sewVariant = sewageStatus(sewagePct).variant;
-              const urgency =
-                Math.max(RANK[waterVariant], RANK[sewVariant]) * 1000 + (100 - waterRemainingPct) + sewagePct;
-              return { h, waterRemainingPct, waterVariant, sewagePct, sewVariant, urgency };
-            })
-            .sort((a, b) => b.urgency - a.urgency);
-
-          const shown = detailRows.slice(0, 8);
-
-          return (
-            <details key={name} className="card" open={communityNeedsTruck}>
-              <summary style={{ cursor: "pointer", fontWeight: 700 }}>
-                {name} — {communityNeedsTruck ? "🚨 needs a truck soon" : "no truck needed right now"}
-              </summary>
-              {detailRows.length > shown.length && (
-                <p style={{ fontSize: "0.78rem", color: "var(--ink-soft)", margin: "8px 0 0" }}>
-                  Showing the {shown.length} highest-risk households of {detailRows.length} in {name}.
-                </p>
-              )}
+              {/* Full risk distribution across every monitored household — not
+                  just the single worst-case badge above, so a community with
+                  one bad house and 20 fine ones reads differently from one
+                  where most houses are struggling. */}
               <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
-                  gap: 12,
-                  marginTop: 10,
-                }}
+                style={{ display: "flex", height: 8, borderRadius: 99, overflow: "hidden", background: "var(--surface-raised)", marginTop: 8, flexShrink: 0 }}
+                title={`${counts.high} needing a truck now · ${counts.medium} approaching a threshold · ${counts.low} OK`}
               >
-                {shown.map(({ h, waterRemainingPct, waterVariant, sewagePct, sewVariant }) => (
-                  <div key={h.id} style={{ textAlign: "center" }}>
-                    <div style={{ fontWeight: 600, fontSize: "0.8rem" }}>
-                      {h.id} ({h.householdSize} people)
-                    </div>
-                    <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
-                      <TankSvg pctFull={waterRemainingPct} variant={waterVariant} label="Water" width={64} height={100} />
-                      <TankSvg pctFull={sewagePct} variant={sewVariant} label="Sewage" width={64} height={100} />
-                    </div>
-                  </div>
-                ))}
+                {(["high", "medium", "low"] as Variant[])
+                  .filter((v) => counts[v] > 0)
+                  .map((v) => (
+                    <div key={v} style={{ width: `${(counts[v] / Math.max(1, hhHere.length)) * 100}%`, background: VARIANT_COLOR[v] }} />
+                  ))}
               </div>
-            </details>
-          );
-        })}
+              <div style={{ display: "flex", gap: 10, marginTop: 6, fontSize: "0.72rem", color: "var(--ink-soft)", flexWrap: "wrap" }}>
+                <span>
+                  <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "var(--danger)", marginRight: 5 }} />
+                  {counts.high} urgent
+                </span>
+                <span>
+                  <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "var(--gold)", marginRight: 5 }} />
+                  {counts.medium} watch
+                </span>
+                <span>
+                  <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "var(--green)", marginRight: 5 }} />
+                  {counts.low} OK
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
+    </div>
+  );
 
-      <h2 className="eyebrow" style={{ marginBottom: 14 }}>
+  // --- Tab 3: per-household water/sewage tile grid. Showing all 4
+  // communities' full household grids stacked at once is what made this
+  // section the tallest part of the page — instead this tab shows ONE
+  // community's FULL household list (every household, not just a top-N cut)
+  // at a time via the selector below, same pattern as the Houses page's
+  // household selector. Every community's full detail is still reachable,
+  // just one at a time. The tile area scrolls internally as a safety net if
+  // a community's household count ever makes a single row too tall — that's
+  // a deliberate contained scroll region, not page-level scroll. ---
+  const householdLevelsTab = (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", flexShrink: 0, marginBottom: 8 }}>
+        <h2 className="eyebrow" style={{ margin: 0 }}>
+          Household water &amp; sewage levels
+          <InfoIcon label="How these are sorted">
+            Highest-risk households first — grouped so it&rsquo;s clear which community actually needs a truck, not
+            just which single house.
+          </InfoIcon>
+        </h2>
+        <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: "0.8rem", fontWeight: 600 }}>Community</span>
+          <select
+            value={selectedCommunity}
+            onChange={(e) => setSelectedCommunity(e.target.value)}
+            style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" }}
+          >
+            {communityNames.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span style={{ fontSize: "0.8rem", color: "var(--ink-soft)" }}>
+          {selectedRow.communityNeedsTruck ? "🚨 needs a truck soon" : "no truck needed right now"} · {selectedShown.length}{" "}
+          household(s) in {selectedCommunity}
+        </span>
+      </div>
+      <div style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(126px, 1fr))",
+            gap: 10,
+          }}
+        >
+          {selectedShown.map(({ h, waterRemainingPct, waterVariant, sewagePct, sewVariant }) => (
+            <div key={h.id} style={{ textAlign: "center" }}>
+              <div style={{ fontWeight: 600, fontSize: "0.76rem" }}>
+                {h.id} ({h.householdSize} people)
+              </div>
+              <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                <TankSvg pctFull={waterRemainingPct} variant={waterVariant} label="Water" width={56} height={88} />
+                <TankSvg pctFull={sewagePct} variant={sewVariant} label="Sewage" width={56} height={88} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  // --- Tab 4: fleet cards in a 2x2 grid (all 4 communities visible without
+  // scrolling), plus the two informational "how it's calculated" / "about
+  // the other communities" sections side-by-side, collapsed by default. ---
+  const fleetCapacityTab = (
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <h2 className="eyebrow" style={{ marginTop: 0, marginBottom: 8, flexShrink: 0 }}>
         Fleet capacity — surge / shortfall check
         <InfoIcon label="The operational question">
           How many truckloads does each community need RIGHT NOW to refill every household&rsquo;s water and pump out
@@ -536,12 +582,12 @@ export default function CommunitiesPage() {
           trucks each community actually runs?
         </InfoIcon>
       </h2>
-      <div style={{ display: "grid", gap: 10, marginBottom: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, flexShrink: 0, marginBottom: 8 }}>
         {fleetRows.map((r) => (
-          <div key={r.name} className="card">
+          <div key={r.name} className="card" style={{ padding: 12 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <strong style={{ fontSize: "1.05rem" }}>{r.name}</strong>
+                <strong style={{ fontSize: "0.95rem" }}>{r.name}</strong>
                 <InfoIcon label="How these numbers are calculated">
                   Water: {r.waterDemandL.toLocaleString(undefined, { maximumFractionDigits: 0 })} L needed now →{" "}
                   {r.water.truckloads} load(s) ÷ ~{r.tripsPerTruckPerDay.toFixed(1)} trips/truck/day →{" "}
@@ -552,7 +598,7 @@ export default function CommunitiesPage() {
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 <Badge
-                  label={r.water.shortfall > 0 ? `Water: short ${r.water.shortfall} truck(s)` : "Water: sufficient"}
+                  label={r.water.shortfall > 0 ? `Water: short ${r.water.shortfall}` : "Water: OK"}
                   variant={r.water.shortfall > 0 ? "high" : "low"}
                   title={
                     r.water.shortfall > 0
@@ -561,7 +607,7 @@ export default function CommunitiesPage() {
                   }
                 />
                 <Badge
-                  label={r.sewage.shortfall > 0 ? `Sewage: short ${r.sewage.shortfall} truck(s)` : "Sewage: sufficient"}
+                  label={r.sewage.shortfall > 0 ? `Sewage: short ${r.sewage.shortfall}` : "Sewage: OK"}
                   variant={r.sewage.shortfall > 0 ? "high" : "low"}
                   title={
                     r.sewage.shortfall > 0
@@ -578,55 +624,76 @@ export default function CommunitiesPage() {
         ))}
       </div>
 
-      <details className="card" style={{ marginBottom: 14 }}>
-        <summary style={{ cursor: "pointer", fontWeight: 600 }}>How the fleet-capacity numbers are calculated</summary>
-        <ul style={{ fontSize: "0.84rem", color: "var(--ink-soft)", lineHeight: 1.6, marginTop: 10 }}>
-          <li>
-            <strong>Demand</strong>: for every monitored household, how many liters it would take to top its water
-            tank back to full right now (<code>currentUsedL</code>), or how many liters are already sitting in its
-            sewage tank waiting to be pumped (<code>currentSewagePct% × tankCapacityL</code>) — summed across the
-            community, then scaled from this demo&rsquo;s household SAMPLE up to the real household count for that
-            community&rsquo;s population.
-          </li>
-          <li>
-            <strong>Truck capacity</strong>: ~{TRUCK_CAPACITY_L.toLocaleString()} L/load — the same figure
-            delivery_comparison_fullscale.py uses to volume-cap a batch.
-          </li>
-          <li>
-            <strong>Truckloads needed</strong>: <code>ceil(total_demand_liters / truck_capacity_liters)</code>.
-          </li>
-          <li>
-            <strong>Trips/truck/day</strong>: derived from the same mechanistic round-trip model — travel there and
-            back at {TRUCK_SPEED_KMH.toFixed(0)} km/h with a {ROAD_DETOUR_FACTOR}x road-detour factor, plus{" "}
-            {ONSITE_SERVICE_MINUTES.toFixed(0)} min on-site service and {TURNAROUND_MINUTES.toFixed(0)} min facility
-            turnaround per trip — averaged per community rather than a flat number.
-          </li>
-          <li>
-            <strong>Trucks needed</strong>: <code>ceil(truckloads_needed / trips_per_truck_per_day)</code>, compared
-            against the actual {ACTUAL_TRUCKS_PER_TYPE} trucks of that type this community&rsquo;s fleet runs to get
-            the shortfall.
-          </li>
-          <li>
-            This is a ceiling-division fleet-sizing estimate (related to the capacitated Inventory Routing Problem in
-            the OR literature), not a full vehicle-routing solve — multi-truck scheduling conflicts (two trucks
-            needed at the same moment, etc.) aren&rsquo;t modeled here.
-          </li>
-        </ul>
-      </details>
+      <div style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <details className="card" style={{ margin: 0, padding: 12, alignSelf: "start" }}>
+          <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.88rem" }}>How the fleet-capacity numbers are calculated</summary>
+          <ul style={{ fontSize: "0.78rem", color: "var(--ink-soft)", lineHeight: 1.5, marginTop: 8 }}>
+            <li>
+              <strong>Demand</strong>: for every monitored household, how many liters it would take to top its water
+              tank back to full right now (<code>currentUsedL</code>), or how many liters are already sitting in its
+              sewage tank waiting to be pumped (<code>currentSewagePct% × tankCapacityL</code>) — summed across the
+              community, then scaled from this demo&rsquo;s household SAMPLE up to the real household count for that
+              community&rsquo;s population.
+            </li>
+            <li>
+              <strong>Truck capacity</strong>: ~{TRUCK_CAPACITY_L.toLocaleString()} L/load — the same figure
+              delivery_comparison_fullscale.py uses to volume-cap a batch.
+            </li>
+            <li>
+              <strong>Truckloads needed</strong>: <code>ceil(total_demand_liters / truck_capacity_liters)</code>.
+            </li>
+            <li>
+              <strong>Trips/truck/day</strong>: derived from the same mechanistic round-trip model — travel there and
+              back at {TRUCK_SPEED_KMH.toFixed(0)} km/h with a {ROAD_DETOUR_FACTOR}x road-detour factor, plus{" "}
+              {ONSITE_SERVICE_MINUTES.toFixed(0)} min on-site service and {TURNAROUND_MINUTES.toFixed(0)} min facility
+              turnaround per trip — averaged per community rather than a flat number.
+            </li>
+            <li>
+              <strong>Trucks needed</strong>: <code>ceil(truckloads_needed / trips_per_truck_per_day)</code>, compared
+              against the actual {ACTUAL_TRUCKS_PER_TYPE} trucks of that type this community&rsquo;s fleet runs to get
+              the shortfall.
+            </li>
+            <li>
+              This is a ceiling-division fleet-sizing estimate (related to the capacitated Inventory Routing Problem
+              in the OR literature), not a full vehicle-routing solve — multi-truck scheduling conflicts (two trucks
+              needed at the same moment, etc.) aren&rsquo;t modeled here.
+            </li>
+          </ul>
+        </details>
 
-      <details className="card">
-        <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-          About the other {REGION_COMMUNITY_COUNT - communityNames.length} {REGION_NAME} communities
-        </summary>
-        <p style={{ fontSize: "0.86rem", color: "var(--ink-soft)", marginTop: 10, lineHeight: 1.6 }}>
-          {REGION_NAME} is a region of {REGION_COMMUNITY_COUNT} communities across northern Quebec (e.g. Kuujjuaq,
-          Salluit, Akulivik, Aupaluk, Kangiqsualujjuaq, and others), each a separate fly-in/sealift-only hamlet with
-          its own treatment facility and truck-based delivery. This prototype demonstrates 4 of the 14 to keep the
-          demo scope realistic for a 3-hour build — the same architecture (plant → truck/radio → house sensors →
-          this dashboard) is designed to extend to all 14 without redesign, since nothing here is specific to any one
-          community&rsquo;s geography.
-        </p>
-      </details>
-    </main>
+        <details className="card" style={{ margin: 0, padding: 12, alignSelf: "start" }}>
+          <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.88rem" }}>
+            About the other {REGION_COMMUNITY_COUNT - communityNames.length} {REGION_NAME} communities
+          </summary>
+          <p style={{ fontSize: "0.8rem", color: "var(--ink-soft)", marginTop: 8, lineHeight: 1.5 }}>
+            {REGION_NAME} is a region of {REGION_COMMUNITY_COUNT} communities across northern Quebec (e.g. Kuujjuaq,
+            Salluit, Akulivik, Aupaluk, Kangiqsualujjuaq, and others), each a separate fly-in/sealift-only hamlet with
+            its own treatment facility and truck-based delivery. This prototype demonstrates 4 of the 14 to keep the
+            demo scope realistic for a 3-hour build — the same architecture (plant → truck/radio → house sensors →
+            this dashboard) is designed to extend to all 14 without redesign, since nothing here is specific to any
+            one community&rsquo;s geography.
+          </p>
+        </details>
+      </div>
+    </div>
+  );
+
+  return (
+    <SingleScreenPage>
+      <PageHeader
+        title="Communities"
+        subtitle={`${REGION_NAME} region has ${REGION_COMMUNITY_COUNT} communities in total — this demo covers 4`}
+      />
+      <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+        <SingleScreenTabs
+          tabs={[
+            { id: "predictions", label: "Prediction maps", content: predictionMapsTab },
+            { id: "overview", label: "Overview & summary", content: overviewSummaryTab },
+            { id: "households", label: "Household levels", content: householdLevelsTab },
+            { id: "fleet", label: "Fleet capacity", content: fleetCapacityTab },
+          ]}
+        />
+      </div>
+    </SingleScreenPage>
   );
 }
