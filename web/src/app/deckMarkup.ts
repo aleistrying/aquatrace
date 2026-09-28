@@ -50,6 +50,10 @@ export const DECK_MARKUP = `
       <path d="M9 20 H15 M12 16.5 V20"/>
       <path d="M6.5 9.8 L10 12.8 L13.5 8.8 L17.5 11.8" stroke-width="1.5"/>
     </symbol>
+    <symbol id="icon-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3.1"/>
+      <path d="M12 4 V6.6 M12 17.4 V20 M20 12 H17.4 M6.6 12 H4 M17.31 6.69 L15.46 8.54 M8.54 15.46 L6.69 17.31 M17.31 17.31 L15.46 15.46 M8.54 8.54 L6.69 6.69"/>
+    </symbol>
   </defs>
 </svg>
 <div class="progress"><div class="progress-bar" id="pbar"></div></div>
@@ -681,8 +685,30 @@ export const DECK_MARKUP = `
       <h2 class="reveal d1" style="font-size:clamp(1.5rem,3.6vw,2rem);">One house, three tanks, one glance.</h2>
       <div class="house-card reveal d2">
         <div class="top">
-          <div><h3 style="font-size:1.2rem;">INU-102</h3><div class="house-meta">7 people &middot; 1800L cistern</div></div>
-          <span class="badge low" id="hrBadge">Tank OK</span>
+          <div><h3 style="font-size:1.2rem;">INU-102</h3><div class="house-meta" id="hrHouseMeta">7 people &middot; 1800L cistern</div></div>
+          <div class="hr-top-right">
+            <div class="hr-actions" id="hrActions" aria-live="polite"></div>
+            <span class="hr-settings-wrap">
+              <button type="button" class="hr-settings-btn" id="hrSettingsBtn" aria-label="Adjust household parameters" aria-expanded="false">
+                <svg viewBox="0 0 24 24"><use href="#icon-gear"/></svg>
+              </button>
+              <div class="hr-settings-panel" id="hrSettingsPanel" role="dialog" aria-label="Household parameters">
+                <div class="hr-settings-field">
+                  <div class="hr-settings-row"><label for="hrHouseholdSize">Household size</label><span class="hr-settings-val" id="hrHouseholdSizeVal">7 people</span></div>
+                  <input type="range" id="hrHouseholdSize" min="1" max="10" step="1" value="7"/>
+                </div>
+                <div class="hr-settings-field">
+                  <div class="hr-settings-row"><label for="hrTankCap">Tank capacity</label><span class="hr-settings-val" id="hrTankCapVal">1800 L</span></div>
+                  <input type="range" id="hrTankCap" min="1200" max="2500" step="100" value="1800"/>
+                </div>
+                <div class="hr-settings-field">
+                  <div class="hr-settings-row"><label for="hrSewageRate">Sewage fill rate</label><span class="hr-settings-val" id="hrSewageRateVal">7%/day</span></div>
+                  <input type="range" id="hrSewageRate" min="3" max="15" step="0.5" value="7"/>
+                </div>
+                <label class="hr-settings-check"><input type="checkbox" id="hrFreezeToggle"/> Simulate deep freeze (&le;&minus;30&deg;C)</label>
+              </div>
+            </span>
+          </div>
         </div>
         <div class="tank-row" id="tankrow">
           <div class="tank">
@@ -722,8 +748,12 @@ export const DECK_MARKUP = `
               <path class="tank-shape-outline" d="M12,32 A48,16 0 0 1 108,32 V144 A48,16 0 0 1 12,144 Z"/>
               <g clip-path="url(#tankClipPotability)">
                 <rect class="tank-fill-rect" data-tank="potability" data-h="86" x="12" y="47.68" width="96" height="96.32" fill="var(--green)">
-                  <animate attributeName="y" values="47.68;47.68;82.4;110.4;131.68;47.68" keyTimes="0;0.30;0.55;0.78;0.92;1" dur="19s" repeatCount="indefinite"/>
-                  <animate attributeName="height" values="96.32;96.32;61.6;33.6;12.32;96.32" keyTimes="0;0.30;0.55;0.78;0.92;1" dur="19s" repeatCount="indefinite"/>
+                  <!-- Shares water's exact dur/keyTimes (16s; 0;0.28;0.52;0.72;0.88;1) so chlorine
+                       "resets" at the same instant the tank refills - a real delivery tops up both
+                       at once (see simEngine.ts). The decay shape itself (front-loaded, easing toward
+                       the floor) still differs from water's straight-line drain within that shared cycle. -->
+                  <animate attributeName="y" values="47.68;47.68;85.76;117.12;136.16;47.68" keyTimes="0;0.28;0.52;0.72;0.88;1" dur="16s" repeatCount="indefinite"/>
+                  <animate attributeName="height" values="96.32;96.32;58.24;26.88;7.84;96.32" keyTimes="0;0.28;0.52;0.72;0.88;1" dur="16s" repeatCount="indefinite"/>
                 </rect>
               </g>
               <path class="tank-shape-outline-stroke" d="M12,32 A48,16 0 0 1 108,32 V144 A48,16 0 0 1 12,144 Z"/>
@@ -732,7 +762,7 @@ export const DECK_MARKUP = `
             <div class="tank-forecast" id="hrPotForecast">~23 days until retest recommended</div>
           </div>
         </div>
-        <p style="font-size:0.8rem;color:var(--ink-soft);margin-top:14px;">A full sewage tank blocks water use on its own — never hidden inside the water badge. Days-left estimates use this household&apos;s own consumption, sewage fill rate, and chlorine decay &mdash; the same formulas as the live view.</p>
+        <p style="font-size:0.8rem;color:var(--ink-soft);margin-top:14px;">A full sewage tank blocks water use on its own — never hidden inside the water tank&apos;s own status. Days-left estimates use this household&apos;s own consumption, sewage fill rate, and chlorine decay &mdash; the same formulas as the live view.</p>
       </div>
       <a class="deck-live-link reveal d3" href="/houses">See this household live &rarr;</a>
     </div>

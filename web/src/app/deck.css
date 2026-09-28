@@ -127,12 +127,49 @@ p.lede{font-size:1.05rem;color:var(--ink-soft);max-width:620px;margin-top:12px;}
 .tank.outdoor .tank-shape-outline-stroke{stroke-dasharray:4 3;}
 .tank-loc{font-family:var(--font-mono);font-size:0.62rem;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-soft);}
 .tank.outdoor .tank-loc{color:var(--gold);}
-.tank-forecast{font-family:var(--font-mono);font-size:0.6rem;color:var(--ink-soft);text-align:center;max-width:112px;line-height:1.35;margin-top:1px;}
+/* min-height reserves room for the longest caption this card ever shows -
+   measured worst case wraps to 3 lines at this width (e.g. "~4.2 days until
+   below the safe floor") - so the line-wrap count changing as the loop plays
+   never reflows the card (verified via Playwright across a full cycle). */
+.tank-forecast{font-family:var(--font-mono);font-size:0.6rem;color:var(--ink-soft);text-align:center;max-width:112px;line-height:1.35;margin-top:1px;min-height:4.2em;}
 .badge{display:inline-flex;align-items:center;gap:5px;padding:4px 11px;border-radius:99px;font-size:0.72rem;font-weight:700;letter-spacing:0.02em;text-transform:uppercase;}
 .badge.low{background:var(--green-tint);color:var(--green);} .badge.med{background:var(--gold-tint);color:var(--gold);} .badge.high{background:var(--danger-tint);color:var(--danger);}
 .house-card{background:var(--surface);border:1px solid var(--border);border-radius:15px;padding:18px 20px;margin-top:14px;}
 .house-card .top{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;}
 .house-meta{font-size:0.78rem;color:var(--ink-soft);margin-top:3px;font-family:var(--font-mono);}
+
+/* ===== HR — Household Reading slide: recommended-actions pills + settings
+   panel (hr- prefixed, scoped to this one slide) ===== */
+/* Replaces the removed single worst-of-three #hrBadge: only the tags actually
+   warranted by the current computed state show up, reusing .badge's pill
+   visual language (variant colors) instead of a shared-rule edit. min-height
+   reserves room for up to 2 rows of pills so the tag count/wording changing
+   through the loop never reflows the card (fix for the same layout-jump
+   issue as .tank-forecast above). */
+.hr-top-right{display:flex;align-items:flex-start;gap:8px;}
+.hr-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;align-content:flex-start;max-width:180px;min-height:48px;}
+.hr-actions .badge{font-size:0.6rem;padding:4px 9px;white-space:nowrap;}
+.hr-actions-empty{font-family:var(--font-mono);font-size:0.66rem;color:var(--ink-soft);text-align:right;padding-top:5px;}
+
+/* gear settings toggle: same open/close visual idiom as .ch-info-btn/.ch-info-pop
+   (Challenges slide), reimplemented here for a single tunable-parameters panel. */
+.hr-settings-wrap{position:relative;display:inline-flex;vertical-align:top;flex-shrink:0;}
+.hr-settings-btn{width:26px;height:26px;flex-shrink:0;border-radius:50%;border:1px solid var(--border);background:var(--surface-raised);color:var(--ink-soft);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;}
+.hr-settings-btn svg{width:14px;height:14px;display:block;}
+.hr-settings-btn:hover,.hr-settings-btn.open{border-color:var(--teal);color:var(--teal);background:var(--teal-tint);}
+.hr-settings-panel{display:none;position:absolute;z-index:40;top:calc(100% + 8px);right:0;width:230px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,0.22);}
+.hr-settings-panel.open{display:block;}
+.hr-settings-field{margin-top:10px;}
+.hr-settings-field:first-child{margin-top:0;}
+.hr-settings-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+.hr-settings-row label{font-size:0.7rem;color:var(--ink-soft);}
+.hr-settings-val{font-family:var(--font-mono);font-size:0.68rem;color:var(--ink);white-space:nowrap;}
+.hr-settings-field input[type="range"]{width:100%;margin-top:4px;accent-color:var(--teal);}
+.hr-settings-check{display:flex;align-items:center;gap:6px;margin-top:12px;font-size:0.72rem;color:var(--ink-soft);cursor:pointer;}
+.hr-settings-check input{accent-color:var(--teal);}
+@media (max-width:640px){
+  .hr-settings-panel{right:auto;left:0;}
+}
 
 .readout{background:var(--surface);border:1px solid var(--border);border-radius:15px;padding:20px;margin-top:16px;}
 .readout-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:16px;margin-top:14px;}

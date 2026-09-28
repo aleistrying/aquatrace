@@ -183,8 +183,10 @@ export default function DeckBody({ html }: { html: string }) {
         // which reflects the live SMIL-animated value, not the static base
         // attribute) and feeds it through the same real formulas the live
         // Houses page uses, so the on-slide percentage, days-remaining
-        // caption, fill color, and headline badge all stay truthfully in
-        // sync with whatever the loop is showing at that instant.
+        // caption, fill color, and recommended-action tags all stay
+        // truthfully in sync with whatever the loop is showing at that
+        // instant - and with whatever the settings panel below is currently
+        // set to.
         const waterRectMaybe = document.querySelector<SVGRectElement>('.tank-fill-rect[data-tank="water"]');
         const sewageRectMaybe = document.querySelector<SVGRectElement>('.tank-fill-rect[data-tank="sewage"]');
         const potRectMaybe = document.querySelector<SVGRectElement>('.tank-fill-rect[data-tank="potability"]');
@@ -198,7 +200,17 @@ export default function DeckBody({ html }: { html: string }) {
         const sewageForecastEl = document.getElementById("hrSewageForecast");
         const potPctEl = document.getElementById("hrPotPct");
         const potForecastEl = document.getElementById("hrPotForecast");
-        const badgeEl = document.getElementById("hrBadge") as HTMLElement | null;
+        const actionsEl = document.getElementById("hrActions");
+        const houseMetaEl = document.getElementById("hrHouseMeta");
+
+        // Mutable "current parameters" the settings panel below tunes live -
+        // seeded from the named constants at the top of this file. tick()
+        // always reads these (never the constants directly) so a panel change
+        // is picked up by the very next tick.
+        let paramHouseholdSize = HR_HOUSEHOLD_SIZE;
+        let paramTankCapacityL = HR_TANK_CAPACITY_L;
+        let paramSewageFillRate = HR_SEWAGE_FILL_RATE_PCT_PER_DAY;
+        let paramTempC = FALLBACK_TEMP_C;
 
         function pctFromRect(rect: SVGRectElement): number {
           const h = rect.getBBox().height;
@@ -206,11 +218,6 @@ export default function DeckBody({ html }: { html: string }) {
         }
         function badgeClass(variant: StatusResult["variant"]): string {
           return variant === "medium" ? "med" : variant;
-        }
-        function worstOf(...results: StatusResult[]): StatusResult {
-          let best = results[0];
-          for (const r of results) if (RANK[r.variant] > RANK[best.variant]) best = r;
-          return best;
         }
 
         function tick() {
@@ -227,10 +234,10 @@ export default function DeckBody({ html }: { html: string }) {
           if (sewagePctEl) sewagePctEl.textContent = `${Math.round(sewagePct)}%`;
           if (potPctEl) potPctEl.textContent = `${Math.round(potPct)}%`;
 
-          const remainingL = (waterPct / 100) * HR_TANK_CAPACITY_L;
-          const waterFc = waterForecastFromRemainingL(remainingL, HR_HOUSEHOLD_SIZE, FALLBACK_TEMP_C);
-          const sewageFc = sewageForecastFromPct(sewagePct, HR_SEWAGE_FILL_RATE_PCT_PER_DAY);
-          const potFc = potabilityForecastFromResidual(residualMgL, FALLBACK_TEMP_C);
+          const remainingL = (waterPct / 100) * paramTankCapacityL;
+          const waterFc = waterForecastFromRemainingL(remainingL, paramHouseholdSize, paramTempC);
+          const sewageFc = sewageForecastFromPct(sewagePct, paramSewageFillRate);
+          const potFc = potabilityForecastFromResidual(residualMgL, paramTempC);
           if (waterForecastEl) waterForecastEl.textContent = waterFc.text;
           if (sewageForecastEl) sewageForecastEl.textContent = sewageFc.text;
           if (potForecastEl) potForecastEl.textContent = potFc.text;
@@ -251,14 +258,32 @@ export default function DeckBody({ html }: { html: string }) {
           sewageRect.style.fill = LEVEL_BAR_COLOR[sewDisp.variant];
           potRect.style.fill = LEVEL_BAR_COLOR[qualityDisp.variant];
 
-          if (badgeEl) {
-            const worst = worstOf(
-              { ...qty, ...qtyDisp },
-              { ...sew, ...sewDisp },
-              { ...quality, ...qualityDisp },
-            );
-            badgeEl.textContent = worst.label;
-            badgeEl.className = `badge ${badgeClass(worst.variant)}`;
+          // Recommended-actions pills, replacing the old single worst-of-three
+          // badge: derived from the SAME escalated variants already computed
+          // above for each tank's own color/label (not a separately-invented
+          // check), so the tags are always a truthful, non-redundant summary
+          // of what a dispatcher would do next. Water+sewage collapse into one
+          // "SEND DRIVER" catch-all only when BOTH are genuinely urgent at
+          // once, rather than showing two overlapping tank-specific tags.
+          const waterUrgent = qtyDisp.variant !== "low";
+          const sewageUrgent = sewDisp.variant !== "low";
+          const tags: { text: string; variant: StatusResult["variant"] }[] = [];
+          if (waterUrgent && sewageUrgent) {
+            tags.push({ text: "Send driver", variant: RANK[qtyDisp.variant] >= RANK[sewDisp.variant] ? qtyDisp.variant : sewDisp.variant });
+          } else if (waterUrgent) {
+            tags.push({ text: "Send water", variant: qtyDisp.variant });
+          } else if (sewageUrgent) {
+            tags.push({ text: "Send sewage", variant: sewDisp.variant });
+          }
+          if (qualityDisp.variant === "high") {
+            tags.push({ text: "Boil water", variant: "high" });
+          } else if (qualityDisp.variant === "medium") {
+            tags.push({ text: "Potability check", variant: "medium" });
+          }
+          if (actionsEl) {
+            actionsEl.innerHTML = tags.length
+              ? tags.map((t) => `<span class="badge ${badgeClass(t.variant)}">${t.text}</span>`).join("")
+              : `<span class="hr-actions-empty">No action needed</span>`;
           }
         }
         tick();
@@ -267,6 +292,88 @@ export default function DeckBody({ html }: { html: string }) {
         // per page load (guarded by ref.current.dataset.mounted above) and
         // lives for the life of the /deck page, same as the other IIFEs here.
         void id;
+
+        // Settings panel: same open/close idiom as the Challenges slide's
+        // info-icon popovers (the IIFE above this one) - a gear button toggles
+        // a small panel; outside click or Escape closes it. Every input feeds
+        // one of the paramX mutable variables tick() reads above, and calls
+        // tick() immediately so the change is visible without waiting for the
+        // next 200ms poll.
+        const settingsBtn = document.getElementById("hrSettingsBtn") as HTMLButtonElement | null;
+        const settingsPanel = document.getElementById("hrSettingsPanel");
+        const sizeInput = document.getElementById("hrHouseholdSize") as HTMLInputElement | null;
+        const sizeVal = document.getElementById("hrHouseholdSizeVal");
+        const capInput = document.getElementById("hrTankCap") as HTMLInputElement | null;
+        const capVal = document.getElementById("hrTankCapVal");
+        const rateInput = document.getElementById("hrSewageRate") as HTMLInputElement | null;
+        const rateVal = document.getElementById("hrSewageRateVal");
+        const freezeToggle = document.getElementById("hrFreezeToggle") as HTMLInputElement | null;
+
+        function closeSettings() {
+          settingsPanel?.classList.remove("open");
+          settingsBtn?.classList.remove("open");
+          settingsBtn?.setAttribute("aria-expanded", "false");
+        }
+        if (settingsBtn && settingsPanel) {
+          settingsBtn.addEventListener("click", function (e) {
+            e.stopPropagation();
+            const wasOpen = settingsPanel.classList.contains("open");
+            if (wasOpen) {
+              closeSettings();
+              return;
+            }
+            settingsPanel.classList.add("open");
+            settingsBtn.classList.add("open");
+            settingsBtn.setAttribute("aria-expanded", "true");
+          });
+        }
+        document.addEventListener("click", function (e) {
+          const target = e.target as HTMLElement;
+          if (!target.closest("#hrSettingsPanel") && !target.closest("#hrSettingsBtn")) closeSettings();
+        });
+        document.addEventListener("keydown", function (e) {
+          if (e.key === "Escape") closeSettings();
+        });
+
+        function updateHouseMeta() {
+          if (houseMetaEl) houseMetaEl.textContent = `${paramHouseholdSize} people · ${paramTankCapacityL}L cistern`;
+        }
+        if (sizeInput) {
+          sizeInput.addEventListener("input", function () {
+            paramHouseholdSize = +sizeInput.value;
+            if (sizeVal) sizeVal.textContent = `${paramHouseholdSize} people`;
+            updateHouseMeta();
+            tick();
+          });
+        }
+        if (capInput) {
+          capInput.addEventListener("input", function () {
+            paramTankCapacityL = +capInput.value;
+            if (capVal) capVal.textContent = `${paramTankCapacityL} L`;
+            updateHouseMeta();
+            tick();
+          });
+        }
+        if (rateInput) {
+          rateInput.addEventListener("input", function () {
+            paramSewageFillRate = +rateInput.value;
+            if (rateVal) rateVal.textContent = `${paramSewageFillRate}%/day`;
+            tick();
+          });
+        }
+        if (freezeToggle) {
+          freezeToggle.addEventListener("change", function () {
+            // FREEZE_DRIP_THRESHOLD_C is -30C (model.ts) - anything at/below it
+            // engages the real FREEZE_DRIP_MULTIPLIER path in
+            // waterForecastFromRemainingL (taps left dripping burns extra
+            // water, so days-remaining drops) while also slowing the chlorine
+            // decay rate in potabilityForecastFromResidual (colder = slower
+            // reaction, via the same Q10 term chlorineRateConstant uses) - two
+            // real, independently-verifiable effects from one toggle.
+            paramTempC = freezeToggle.checked ? -32 : FALLBACK_TEMP_C;
+            tick();
+          });
+        }
       })();
 
       (function () {
