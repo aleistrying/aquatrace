@@ -540,9 +540,20 @@ function TruckMap({
         else sewageActive += 1;
         const targetPt = posById.get(truck.target);
         if (targetPt) {
-          px = facilityPt.x + (targetPt.x - facilityPt.x) * frac;
-          py = facilityPt.y + (targetPt.y - facilityPt.y) * frac;
-          angleDeg = (Math.atan2(targetPt.y - facilityPt.y, targetPt.x - facilityPt.x) * 180) / Math.PI;
+          // The dispatch/availability timer (simEngine.ts's TRIP_DURATION_MS)
+          // already represents the truck's FULL round trip - out, deliver,
+          // back - so this splits that same real duration into two visual
+          // legs (out for the first half, back for the second) rather than
+          // treating frac=1 as "arrived" and snapping straight to idle at
+          // the depot. No engine/timing change, purely how the existing
+          // number is animated.
+          const returning = frac >= 0.5;
+          const legT = returning ? (frac - 0.5) / 0.5 : frac / 0.5;
+          const fromPt = returning ? targetPt : facilityPt;
+          const toPt = returning ? facilityPt : targetPt;
+          px = fromPt.x + (toPt.x - fromPt.x) * legT;
+          py = fromPt.y + (toPt.y - fromPt.y) * legT;
+          angleDeg = (Math.atan2(toPt.y - fromPt.y, toPt.x - fromPt.x) * 180) / Math.PI;
 
           activeLines.push(
             <line
@@ -554,7 +565,8 @@ function TruckMap({
               y2={targetPt.y}
               stroke={color}
               strokeWidth={2.5}
-              strokeOpacity={0.8}
+              strokeOpacity={returning ? 0.4 : 0.8}
+              strokeDasharray={returning ? "3 3" : undefined}
             />,
           );
           for (const bId of truck.batch) {
@@ -596,9 +608,13 @@ function TruckMap({
           <title>
             {`${kind} truck ${idx + 1}: ${
               truck.status === "en_route"
-                ? `en route to ${truck.target}${truck.batch.length ? ` (+${truck.batch.length} nearby)` : ""} — ${Math.round(
-                    frac * 100,
-                  )}% there${truck.delayed ? `, delayed (${truck.delayReason})` : ""}`
+                ? frac >= 0.5
+                  ? `returning to the plant from ${truck.target}${truck.batch.length ? ` (+${truck.batch.length} nearby)` : ""} — ${Math.round(
+                      ((frac - 0.5) / 0.5) * 100,
+                    )}% of the way back${truck.delayed ? `, delayed (${truck.delayReason})` : ""}`
+                  : `en route to ${truck.target}${truck.batch.length ? ` (+${truck.batch.length} nearby)` : ""} — ${Math.round(
+                      (frac / 0.5) * 100,
+                    )}% there${truck.delayed ? `, delayed (${truck.delayReason})` : ""}`
                 : "idle at facility"
             }`}
           </title>
