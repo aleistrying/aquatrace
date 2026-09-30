@@ -62,6 +62,18 @@ const EVENT_TYPE_LABEL: Record<EventType, string> = {
   delay: "📻 delay",
   sync: "📡 batch sync",
 };
+const EVENT_TYPE_COLOR: Record<EventType, string> = {
+  dispatch: "var(--teal)",
+  arrival: "var(--green)",
+  delay: "var(--gold)",
+  sync: "var(--ink-soft)",
+};
+const EVENT_TYPE_ICON: Record<EventType, string> = {
+  dispatch: "🚚",
+  arrival: "✅",
+  delay: "📻",
+  sync: "📡",
+};
 
 // Fixed seed instant for this "isolated demo clock" (see the page's own
 // InfoIcon on that label) - using the live Date.now() here made the initial
@@ -760,45 +772,6 @@ export default function SimulationPage() {
     };
   }, [devPanelOpen]);
 
-  // Item B: a dismissible, one-line "start here" hint under the tab bar,
-  // shown once ever (persisted in localStorage - a plain state flag would
-  // reset on every reload, which isn't "shown once" for a real demo viewer
-  // reopening the tab). Starts false on both server and client renders (no
-  // localStorage on the server) and is only ever flipped true from an
-  // effect that runs post-mount, so there's no hydration mismatch - just a
-  // hint that may briefly show for returning visitors before this effect
-  // reads localStorage, same tradeoff as any other localStorage-backed UI.
-  const HINT_STORAGE_KEY = "aquatrace-sim-tab-hint-dismissed";
-  const [hintDismissed, setHintDismissed] = useState(false);
-  useEffect(() => {
-    // Deferred to a macrotask - same "keep setState out of the effect's
-    // synchronous body" idiom the surge-detector/comparison effects below
-    // already use - rather than calling setState directly in the effect body.
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      if (cancelled) return;
-      try {
-        if (window.localStorage.getItem(HINT_STORAGE_KEY) === "1") setHintDismissed(true);
-      } catch {
-        // Private-browsing/storage-blocked: fall back to always showing the
-        // hint until dismissed this session - never crash the page over it.
-      }
-    }, 0);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, []);
-  const dismissHint = useCallback(() => {
-    setHintDismissed(true);
-    try {
-      window.localStorage.setItem(HINT_STORAGE_KEY, "1");
-    } catch {
-      // Same storage-blocked fallback as above - dismissal just won't
-      // persist across reloads in that case, which is a harmless downgrade.
-    }
-  }, []);
-
   const [temps, setTemps] = useState<Record<string, number>>({});
 
   // Live weather, fetched once per community (Python's fetch_current_temp_c
@@ -1212,6 +1185,42 @@ export default function SimulationPage() {
         <InfoIcon label="Why refills are slow today">
           No per-house data means a truck visits blind — about 2 weeks to reach everyone once. Real measurement lets
           the same trucks prioritize who actually needs it.
+        </InfoIcon>
+      </div>
+
+      {/* Monitoring stats — relocated from the old always-on-every-tab
+          status strip (see the persistent header above) so they only cost
+          space on this monitoring tab, not on Trucks/Households/Event log
+          too. "Extra drivers needed" here is the raw aggregate backlog
+          count across all 4 communities; the surge banner above the tabs is
+          a different, more actionable signal (a SUSTAINED trend for ONE
+          community with a real recommended fix) - the InfoIcon spells out
+          the distinction so the two numbers are never read as contradicting
+          each other. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 20,
+          flexWrap: "wrap",
+          padding: "6px 12px",
+          marginBottom: 12,
+          borderRadius: 10,
+          background: "var(--surface-raised)",
+          border: "1px solid var(--border)",
+        }}
+      >
+        <Metric label="Households filled/emptied so far" value={sim.totalServiced} />
+        <Metric
+          label="🚚 Extra drivers needed right now"
+          value={<BacklogFlashValue value={totalBacklog} />}
+          help="Households currently urgent (water or sewage) that no truck is already heading to, across all 4 communities — 0 means the current fleet is keeping up with every urgent household this instant. This is a raw instant count, unlike the surge banner above (which only fires for a SUSTAINED trend in one community and comes with a real recommended fix)."
+        />
+        <Metric label="📡 Last synced" value={`${minutesSinceSync.toFixed(0)} min ago`} help={`Simulated time of last batch sync: ${formatSimDateTime(sim.lastSync)}`} />
+        <Metric label="Next batch sync in" value={`${minutesUntilSync.toFixed(0)} min`} />
+        <InfoIcon label="How syncing works in real deployment">
+          Real deployment: data batches whenever a connection is available (at the plant, at a house, or via a radio check-in) — not
+          continuous live telemetry, since trucks have no signal in transit.
         </InfoIcon>
       </div>
 
@@ -1983,7 +1992,18 @@ export default function SimulationPage() {
 
   const eventsTab: ReactNode = (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <h4 style={{ margin: "0 0 8px 0", flexShrink: 0 }}>Event log ({sim.events.length})</h4>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", marginBottom: 8, flexShrink: 0 }}>
+        <h4 style={{ margin: 0 }}>Event log ({sim.events.length})</h4>
+        {(Object.keys(EVENT_TYPE_LABEL) as EventType[]).map((t) => (
+          <span key={t} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: "0.72rem", color: "var(--ink-soft)" }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: EVENT_TYPE_COLOR[t], display: "inline-block" }} />
+            {EVENT_TYPE_LABEL[t]}
+          </span>
+        ))}
+      </div>
+      {/* Icon+color per row (by event.type) instead of a plain text dump —
+          same "components not summaries" idiom as the rest of the app,
+          applied to a log that was previously the one wall-of-text holdout. */}
       <div style={{ flex: "1 1 auto", overflowY: "auto", minHeight: 0 }}>
         {[...sim.events]
           .slice(-40)
@@ -1992,9 +2012,20 @@ export default function SimulationPage() {
             <div
               key={`${event.atMs}-${event.type}-${event.text}`}
               className="pg-event-row"
-              style={{ fontSize: "0.8rem", padding: "4px 0", borderBottom: "1px solid var(--border)" }}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+                fontSize: "0.8rem",
+                padding: "6px 4px",
+                borderBottom: "1px solid var(--border)",
+                borderLeft: `3px solid ${EVENT_TYPE_COLOR[event.type]}`,
+              }}
             >
-              {event.text}
+              <span aria-hidden="true" style={{ flexShrink: 0 }}>
+                {EVENT_TYPE_ICON[event.type]}
+              </span>
+              <span>{event.text}</span>
             </div>
           ))}
       </div>
@@ -2013,10 +2044,14 @@ export default function SimulationPage() {
         subtitle="Fast-forward demo — 2 water-delivery trucks + 2 sewage-pump trucks per community, watch the algorithm work over simulated time"
       />
 
-      {/* Persistent live-status strip — shown above the tabs regardless of
-          which one is active, so the ticking clock/backlog/sync numbers
-          (the actual proof the simulation keeps running underneath) stay
-          visible no matter what the user is currently looking at. */}
+      {/* Persistent live-status strip — kept to ONE proof-of-life number
+          (shown above the tabs regardless of which one is active) so it
+          never competes for attention with tab-specific content. The
+          household/backlog/sync counters that used to live here permanently
+          on every tab are still real and still shown - just relocated into
+          the Controls tab below, where the rest of the monitoring context
+          already lives, instead of costing space on Trucks/Households/Event
+          log too. */}
       <div
         style={{
           flexShrink: 0,
@@ -2032,18 +2067,6 @@ export default function SimulationPage() {
         }}
       >
         <Metric label="Simulated time" value={formatSimDateTime(sim.now)} testId="metric-sim-time" />
-        <Metric label="Households filled/emptied so far" value={sim.totalServiced} />
-        <Metric
-          label="🚚 Extra drivers needed right now"
-          value={<BacklogFlashValue value={totalBacklog} />}
-          help="Households currently urgent (water or sewage) that no truck is already heading to, across all 4 communities — 0 means the current fleet is keeping up with every urgent household this instant."
-        />
-        <Metric label="📡 Last synced" value={`${minutesSinceSync.toFixed(0)} min ago`} help={`Simulated time of last batch sync: ${formatSimDateTime(sim.lastSync)}`} />
-        <Metric label="Next batch sync in" value={`${minutesUntilSync.toFixed(0)} min`} />
-        <InfoIcon label="How syncing works in real deployment">
-          Real deployment: data batches whenever a connection is available (at the plant, at a house, or via a radio check-in) — not
-          continuous live telemetry, since trucks have no signal in transit.
-        </InfoIcon>
       </div>
 
       {/* Proactive surge recommendation — see the detection effect above for
@@ -2085,54 +2108,11 @@ export default function SimulationPage() {
       )}
 
       <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}>
-        {/* Item B: dismissible, shown-once "start here" hint pointing at the
-            tab bar immediately below it — can't be placed literally under
-            the tab BUTTONS themselves without editing SingleScreenTabs
-            (out of scope for this page's file ownership), so it sits right
-            above the tab bar it's introducing instead. Persisted via
-            localStorage (see the effect near the top) so a returning
-            presenter isn't nagged every reload. */}
-        {!hintDismissed && (
-          <div
-            data-testid="tab-guide-hint"
-            style={{
-              flexShrink: 0,
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "6px 12px",
-              marginBottom: 8,
-              borderRadius: 10,
-              background: "var(--teal-tint)",
-              border: "1px solid var(--teal)",
-              fontSize: "0.8rem",
-              color: "var(--teal)",
-            }}
-          >
-            <span aria-hidden="true">👇</span>
-            <span style={{ flex: "1 1 auto" }}>
-              Start here: <strong>Controls &amp; drivers</strong>, then <strong>Trucks &amp; map</strong> to see the fleet respond →
-            </span>
-            <button
-              type="button"
-              onClick={dismissHint}
-              aria-label="Dismiss this hint"
-              data-testid="tab-guide-hint-dismiss"
-              style={{
-                border: "none",
-                background: "transparent",
-                color: "var(--teal)",
-                fontWeight: 700,
-                cursor: "pointer",
-                fontSize: "0.9rem",
-                padding: "2px 6px",
-                flexShrink: 0,
-              }}
-            >
-              ×
-            </button>
-          </div>
-        )}
+        {/* The "start here" hint that used to sit here was a band-aid for a
+            tab bar that had to compete with too much surrounding chrome for
+            attention. With the status strip above cut to one number and the
+            hint itself removed, the tab bar is now the first interactive
+            thing on the page - it doesn't need a sign pointing at it. */}
         <div style={{ flex: "1 1 auto", minHeight: 0 }}>
           <SingleScreenTabs
             tabs={[
